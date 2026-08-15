@@ -1,0 +1,23 @@
+{
+  "criteria": [
+    {
+      "name": "判据一（演示·通过）",
+      "value": 1.0005,
+      "reference": 1.0,
+      "tolerance": 0.001,
+      "note": "示例：演示 pass"
+    },
+    {
+      "name": "判据二（演示·超差）",
+      "value": 1.05,
+      "reference": 1.0,
+      "tolerance": 0.001,
+      "note": "示例：演示 fail"
+    },
+    {
+      "name": "判据三（演示·缺锚点）",
+      "value": 0.123,
+      "note": "示例：演示 need_human（reference 缺失）"
+    }
+  ]
+}
