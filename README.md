@@ -27,6 +27,6 @@
 3. ✅ Step 4A：推导线 vertical slice
 4. ✅ Step 4B：数值复现线 vertical slice
 5. ✅ Step 4C / P0-P1：复合验证 + knowledge/ + 完整奇异场验收
-6. ⏳ Step 5：评测集
+6. ✅ Step 5：评测集第一轮基线（5 用例五类全覆盖，5/5 PASS；benchmarks.md 基准库建立）
 
 每步产出经用户复核后才进入下一步。
