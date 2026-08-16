@@ -151,9 +151,9 @@ $WOLFRAM -file script.wl
   "C:/Program Files/Wolfram Research/Wolfram Engine/15.0/wolframscript.exe" -code "Print[2+2]; Quit[]"
   ```
 
-脚本开头配置 xAct（`$SKILL_DIR` 由主 agent 替换为实际路径）：
+脚本开头配置 xAct。`$SKILL_DIR` 为**占位符**：由主 agent 替换为完整版 skill 的实际路径字符串（如 `"C:/Users/alice/.workbuddy/skills/xact-assistant"`），**不要当作 Wolfram 变量使用**——`$` 开头符号与系统命名空间冲突，赋值无效（实测 `StringJoin::string` 报错）：
 ```mathematica
-PrependTo[$Path, "$SKILL_DIR/references"];
+PrependTo[$Path, "<完整版实际路径>/references"];   (* 示例: "C:/Users/alice/.workbuddy/skills/xact-assistant/references" *)
 Needs["xAct`xTensor`"];
 Needs["xAct`xPert`"];
 Needs["xAct`xCoba`"];
