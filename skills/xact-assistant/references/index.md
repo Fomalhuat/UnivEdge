@@ -22,6 +22,8 @@
 
 ## 任务 → 包/参考 映射
 
+> 标注"教程"的项为**增强资源**（`lectures/`，本仓库版不含），解析顺序见 SKILL.md"资源可用性"；标注"参考/模板"的项为仓库版自包含文件。
+
 ### 定义时空背景（Schwarzschild/Kerr/FLRW 等）
 - 包：xTensor, xCoba
 - 参考：`xact-basics.md`

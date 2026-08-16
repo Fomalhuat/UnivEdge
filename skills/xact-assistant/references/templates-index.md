@@ -1,8 +1,10 @@
 # 模板与示例索引 — 任务到代码的映射
 
-`templates/` 目录包含两类代码资源：
-- **.wl 骨架脚本** — 精简的起步模板，可直接修改使用
+`templates/` 目录（完整版）包含两类代码资源：
+- **.wl 骨架脚本** — 精简的起步模板，可直接修改使用（仓库版自带 `schwarzschild-perturbation.wl`）
 - **.nb 完整示例** — xAct 官方示例，展示真实的使用模式
+
+> **资源可用性**：`.nb` 示例为**增强资源**，不随本仓库版打包（仓库版 `templates/` 仅含 `.wl` 骨架 + `examples-README.md` 官方清单）。`examples-README.md` 内含每个示例的官方链接，可从完整版或 xAct 官网示例页获取。
 
 **使用方式**：用 Grep 搜索关键函数名定位代码，或直接 Read 整个文件作为参考。
 
@@ -60,12 +62,12 @@
 3. **修改目标计算**（如算 Ricci → 算 Einstein 方程）
 4. **用 wolframscript 验证**
 
-## 示例位置
+## 示例位置（增强资源，完整版才有）
 
 ```
 templates/
-├── examples-README.md               ← 官方说明（英文）
-├── schwarzschild-perturbation.wl    ← .wl 骨架模板（可运行）
+├── examples-README.md               ← 官方说明（英文，仓库版自带）
+├── schwarzschild-perturbation.wl    ← .wl 骨架模板（可运行，仓库版自带）
 ├── Schwarzschild_Metric_Birkhoff_Theorem.nb
 ├── KerrMetric.nb
 ├── ...等21个 .nb 示例...
@@ -73,9 +75,9 @@ templates/
 
 ## 与教程的关系
 
-| 资源 | 关系 |
-|------|------|
-| `lectures/Lecture1-14.nb` | 系统教学，由浅入深 |
-| `lectures/other_lectures/*.nb` | 应用导向，更接近实际研究 |
-| `templates/*.nb` | 完整工作代码，最具体 |
-| `references/xact-basics.md` | agent 提取的速查模式 |
+| 资源 | 关系 | 仓库版 |
+|------|------|--------|
+| `lectures/Lecture1-14.nb` | 系统教学，由浅入深 | 不含（增强） |
+| `lectures/other_lectures/*.nb` | 应用导向，更接近实际研究 | 不含（增强） |
+| `templates/*.nb` | 完整工作代码，最具体 | 不含（增强） |
+| `references/xact-basics.md` | agent 提取的速查模式 | **含（自包含）** |

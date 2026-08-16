@@ -1,6 +1,8 @@
 Example xAct notebooks
 ========
 
+> **资源可用性**：本文件是 xAct 官方示例清单（保留原始相对链接，指向 xAct 官方示例仓库的 master 分支）。`.nb` 示例本体为**增强资源**，不随本仓库版打包——从完整版（公开 GitHub 仓库 `xact-assistant`）或 xAct 官网示例页（https://www.xact.es / https://contrib.xact.es）获取。
+
 This is a collection of example xAct notebooks that contain common xAct usage patterns.  Right click on a file name below and hit "Save link as..." to download a notebook.
 
 [`ActionVariation_Metric_Fields.nb`](../../raw/master/ActionVariation_Metric_Fields.nb):

@@ -51,7 +51,7 @@ agent_created: true
 
 ### 按任务加载
 
-| 任务 | 参考文件 | xAct 教程 | 实战示例 |
+| 任务 | 参考文件（自包含） | xAct 教程（增强¹） | 实战示例（增强¹） |
 |------|---------|----------|---------|
 | 抽象张量代数 | `references/xact-basics.md` | L3, L4, L5, L6 | — |
 | 度规扰动 / gauge | `references/xpert-guide.md` | Paris C §7, Jolyon §2 | `Lagrangian-variation-xPert-VarD.nb` |
@@ -64,9 +64,22 @@ agent_created: true
 | 高阶引力 EOM | — | — | `EDGB-and-DCS-EOMs-and-C-tensors-simplified.nb` |
 | 共形场方程 | — | L11 | `ConformalEinsteinEqs.nb` |
 
+¹ **增强资源** = `lectures/` 教程（L1-L14 + other_lectures）与 `templates/*.nb` 示例，体积原因**不随本仓库版打包**。解析顺序见下"资源可用性"。
+
 ### 教程位置
 
-xAct 教程 .nb 文件位于本模块的 `lectures/` 目录。查 `references/lecture-index.md` 确定读哪个。
+xAct 教程 .nb 文件位于 `lectures/` 目录（增强资源）。查 `references/lecture-index.md` 确定读哪个。该索引在本仓库版中**仅作知识地图**（文件本体不在），实际获取见下。
+
+### 资源可用性（增强资源解析顺序）
+
+核心语法已自包含在 `references/xact-basics.md` 与 `references/xpert-guide.md`，**不依赖增强资源也能完成绝大多数计算**。需要教程/示例/包源码时，按以下顺序解析：
+
+1. **本 skill 安装目录**：若宿主安装的是完整版，`$SKILL_DIR/lectures/`、`$SKILL_DIR/templates/`、`$SKILL_DIR/references/xAct/` 直接可用；
+2. **宿主 user 级 skills 目录**：按宿主平台的 skills 约定探测（如 WorkBuddy `~/.workbuddy/skills/`、Claude Code `~/.claude/skills/`、opencode `~/.config/opencode/` 等），若其中存在 `xact-assistant/`，使用其 `lectures/`、`templates/`、`references/xAct/`；
+3. **公开 GitHub 仓库**：`git clone https://github.com/Fomalhuat/xact-assistant` 到 user 级 skills 目录（完整版，含 xAct 包源码）；
+4. **官方源**：xAct 官网 https://www.xact.es/ （包源码下载 + 文档页 + 教程页）；Jolyon 教程 arXiv:1304.5333。
+
+**找不到增强资源时不卡住**：用 `references/xact-basics.md` 速查 + 官方文档继续任务。
 
 ## xAct vs 纯 Mathematica
 
@@ -92,7 +105,7 @@ xAct 教程 .nb 文件位于本模块的 `lectures/` 目录。查 `references/le
 
 ### 环境配置（首次使用必须完成）
 
-本模块依赖 Wolfram Engine（外部安装）。xAct 包**不随仓库版打包**（完整版见 user 级 skill 的 `references/xAct/`，或使用官方安装，见下 §2）。
+本模块依赖 Wolfram Engine（外部安装）。xAct 包**不随仓库版打包**，获取方式见下 §2 与上文"资源可用性"。
 
 **1. Wolfram Engine / wolframscript 路径**
 
@@ -113,9 +126,10 @@ Get-ChildItem "C:\Program Files (x86)\Wolfram Research" -Recurse -Filter "wolfra
 
 **2. xAct 包路径**
 
-xAct 是开源包，获取方式二选一：
-- **官方安装**（推荐）：`PacletInstall["xAct"]` 或在 Mathematica 中用 `Needs["xAct`xTensor`"]` 触发自动安装（xAct 官网：xact.es）；
-- **随包提供**：若宿主提供了完整版 skill（含 `references/xAct/` 包源码），设 `$SKILL_DIR` 为本 skill 安装目录，则 xAct 路径为 `$SKILL_DIR/references`。
+xAct 是开源包，获取方式三选一（推荐顺序）：
+- **公开 GitHub 仓库**（推荐，含全部增强资源）：`git clone https://github.com/Fomalhuat/xact-assistant` 到 user 级 skills 目录，设 `$SKILL_DIR` 为其安装目录，xAct 路径为 `$SKILL_DIR/references`；
+- **官方安装**：`PacletInstall["xAct"]` 或在 Mathematica 中用 `Needs["xAct`xTensor`"]` 触发自动安装（xAct 官网：xact.es）；
+- **随包提供**：若宿主已提供完整版 skill（含 `references/xAct/` 包源码），设 `$SKILL_DIR` 为本 skill 安装目录，则 xAct 路径为 `$SKILL_DIR/references`。
 
 **3. 记录路径**
 
@@ -163,8 +177,10 @@ Needs["xAct`xCoba`"];
 
 ## 模板与示例
 
-`templates/` 目录包含：
+`templates/` 目录包含（仓库版自带）：
 - `.wl` 骨架脚本 — 精简起步模板，可直接修改
-- `.nb` 完整示例 — xAct 官方示例，展示真实使用模式
+- `examples-README.md` — 官方示例清单（含 21 个 `.nb` 示例的说明与官方链接）
+
+`.nb` 完整示例为**增强资源**（不随仓库版打包，见"资源可用性"）：可查 `references/templates-index.md` 按任务类型定位，再从完整版或 xAct 官网示例页获取。
 
 查 `references/templates-index.md` 按任务类型找到对应代码。
