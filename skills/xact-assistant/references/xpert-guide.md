@@ -2,7 +2,7 @@
 
 xPert 处理度规扰动展开，是线性化引力和高阶扰动计算的核心包。
 
-**教程来源**：`lectures/other_lectures/xTensor_Paris_C.nb` §7（系统讲解）和 `lectures/other_lectures/xActTutorial_JolyonBloomfield.nb` §2（应用示例）。如需深入理解，请查阅这些教程。
+**教程来源**：`lectures/other_lectures/xTensor_Paris_C.nb` §7（系统讲解）和 `lectures/other_lectures/xActTutorial_JolyonBloomfield.nb` §2（应用示例）。这些为**增强资源**（本仓库版不含，见 SKILL.md"资源可用性"）；本指南本身已自包含常用模式，教程仅在需要深入理解时查阅。
 
 ---
 

@@ -1,6 +1,6 @@
 # xAct 官方文档索引 — 主题到 .nb 文件的映射
 
-xAct 官方文档位于 `references/xAct/Documentation/English/` 目录。这些是包自带的权威文档，每个函数或主题有独立的 .nb 文件。
+xAct 官方文档位于**完整版**的 `references/xAct/Documentation/English/` 目录（本仓库版不含 xAct 包，见 SKILL.md"资源可用性"）。这些是包自带的权威文档，每个函数或主题有独立的 .nb 文件。也可在线访问 https://www.xact.es/documentation.html 。
 
 **使用方式**：用 Grep 搜索函数名，或直接 Read 特定 .nb 文件。
 

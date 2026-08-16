@@ -1,6 +1,8 @@
 # xAct 教程索引 — 主题到章节的映射
 
-xAct 教程位于本 skill 的 `lectures/` 目录下。本文件是**主题到章节的映射表**：根据你要做什么，查表确定读哪个 lecture。
+xAct 教程位于完整版的 `lectures/` 目录下。本文件是**主题到章节的映射表**：根据你要做什么，查表确定读哪个 lecture。
+
+> **资源可用性**：`lectures/` 为**增强资源**，不随本仓库版打包。本索引保留为知识地图——先用 `xact-basics.md` / `xpert-guide.md` 的自包含速查；确需教程时按 SKILL.md "资源可用性" 顺序解析（宿主完整版 → 公开 GitHub 仓库 → xAct 官网）。找不到时不要卡住。
 
 ## 按任务类型查找
 
@@ -55,13 +57,13 @@ xAct 教程位于本 skill 的 `lectures/` 目录下。本文件是**主题到�
 ## 使用方法
 
 1. **确定任务类型** — 从上表找到对应的 Lecture
-2. **读取 .nb 文件** — 用 Grep 搜索关键函数名定位代码，或直接 Read
+2. **获取 .nb 文件** — 按 SKILL.md"资源可用性"解析（完整版/公开仓库/官网）；拿到后用 Grep 搜索关键函数名定位代码，或直接 Read
 3. **应用到当前任务** — 参考教程中的模式，适配到具体问题
 
-## 教程位置
+## 教程位置（增强资源）
 
 ```
-lectures/   (本 skill 目录下)
+lectures/   (完整版 skill 目录下，本仓库版不含)
 ├── README.txt                    ← 各 Lecture 的简述（含补充教程说明）
 ├── Lecture1.nb ... Lecture14.nb  ← 主教程（L2 缺失，假定已掌握 Mathematica）
 └── other_lectures/
