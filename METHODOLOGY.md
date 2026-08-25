@@ -27,7 +27,7 @@
 | 层级 | 内容 | 加载时机 |
 |---|---|---|
 | L0 常驻 | `AGENTS.md`（地图） | 每次会话 |
-| L1 核心 | 本文 §0 总则 + §1 通用框架；`knowledge/review-lessons.md` **基层**（四根因方向） | 每次会话（约 120 行） |
+| L1 核心 | 本文 §0 总则 + §1 通用框架；`knowledge/review-lessons.md` **基层**（五根因方向） | 每次会话（约 120 行） |
 | L2 任务 | §2–§6 中与当前任务类型对应的一节 | 由任务契约（§1.2）路由，按需加载；验证时配 `VERIFICATION.md` 对应章节 |
 | L3 引用 | §7 附录、review-lessons 例子层、docs/、knowledge/、config/ | 用到时检索 |
 
