@@ -1,0 +1,3 @@
+- insert:
+    - id: univedge-l1
+      name: file:///data/home/hanwu/UnivEdge/dsh-adapter/univedge-l1-inject.ts

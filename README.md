@@ -1,6 +1,6 @@
 # UnivEdge
 
-物理科研领域内核（Physics Research Domain Kernel）—— 把物理研究方法论工程化为可执行规范的可移植内核；注入宿主运行时（WorkBuddy / 独立 agent 外壳）即构成科研助手（agent），见 docs/06。
+物理科研领域内核（Physics Research Domain Kernel）—— 把物理研究方法论工程化为可执行规范的可移植内核；注入宿主运行时（WorkBuddy / dsh（DeepSeek Harness）/ 独立 agent 外壳）即构成科研助手（agent），见 docs/06。
 
 ## 定位
 
@@ -23,6 +23,35 @@ git clone https://github.com/Fomalhuat/UnivEdge <宿主目录>/UnivEdge
 ```
 
 **让 agent 调用**：向 agent 说一句「项目根目录有 `AGENTS.md`，先读它」即可。后续的加载顺序、任务契约与验证规范由 `AGENTS.md` 按渐进披露协议引导，无需使用者干预。
+
+## 与 dsh（DeepSeek Harness）宿主结合（可选）
+
+[dsh](https://github.com/deepseek-ai/deepseek-harness) 是 DeepSeek 开源的 agent 运行时（"Model + Harness = Agent"）。UnivEdge 作为领域内核，可通过 `dsh-adapter/` 适配层注入 dsh，由 harness **强制**加载协议入口——解决"agent 高强度工作时忘记加载协议"的问题（实测验证，2026-08-28）。
+
+**机制（分层）**：
+
+- dsh 原生自动加载 workspace 的 `AGENTS.md`（L0 入口地图，每步前注入模型上下文）；
+- `dsh-adapter/univedge-l1-inject.ts` 插件在会话启动时额外注入 **L1 层**（METHODOLOGY §0+§1 + review-lessons 基层）——把方法论从"靠 agent 自觉"变成"harness 强制"；实测 agent 会据此产出完整任务契约（启动自省 B1-B4+P 逐条、物理量定义、配置基线、验证标准）并完整执行验证流程；
+- 插件从 workspace（session cwd）向上发现 UnivEdge 根（含 METHODOLOGY.md 的目录），找不到就不注入（不干扰其他 workspace）。
+
+**用法**（在 UnivEdge 目录下启动 dsh headless）：
+
+```bash
+cd <UnivEdge 目录>
+source ~/.nvm/nvm.sh
+export DEEPSEEK_API_KEY='sk-xxx'
+export DSH_PERMISSION_MODE='danger-full-access'   # 见下方沙箱说明
+<dsh路径>/node_modules/.bin/tsx \
+  --tsconfig <dsh路径>/tsconfig.json \
+  <dsh路径>/apps/cli/src/bin.ts \
+  --profile headless \
+  --patch <UnivEdge>/dsh-adapter/cordis.patch.yml \
+  "任务"
+```
+
+> **沙箱说明**：dsh 的 bash 工具默认要求沙箱后端（bubblewrap/Landlock）。HPC 共享服务器常禁止 user namespace（bwrap 不可用、Landlock 需编译 native），此时设 `DSH_PERMISSION_MODE='danger-full-access'` 可让 bash 直接执行（**放弃沙箱隔离**，测试用可接受，生产慎用）。有可用沙箱后端时可不设此变量。
+
+> **Workspace 说明**：dsh headless 的 workspace = 启动目录（`process.cwd()` 硬编码）；要让 workspace 指向 UnivEdge，须在 UnivEdge 目录下启动，并加 `--tsconfig` 指向 dsh 的 tsconfig（否则 cordis 解析错误）。Web 模式则无此问题（workspace 在 UI 里选）。
 
 ## 状态
 
