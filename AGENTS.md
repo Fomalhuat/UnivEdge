@@ -13,7 +13,7 @@ UnivEdge 是一个物理科研领域内核（domain kernel）——注入宿主�
 ## 目录导览
 
 - `docs/` — 设计档案与变更史（01 调研 / 02 需求 / 03 决策 / 04 结构审查 / 05 运行时契约与组件归属 / 07 内核复盘与改进方向 / 08 内核维护工作流）——**记录"为什么这样设计"，不随内核修订同步更新；运行规范以 METHODOLOGY.md / VERIFICATION.md 为准**
-- `knowledge/` — 记录系统（agent 可读）：约定注册表 conventions.md、复核教训 review-lessons.md、基准结果库 benchmarks.md、主张注册表 claims.md、文献库 papers/
+- `knowledge/` — 记录系统（agent 可读）：**内核预置**——约定注册表 conventions.md、复核教训 review-lessons.md（基层）；**领域资产**（非内核预置，使用者按需自建；GitHub 发布版不含，本地完整版保留）——基准结果库 benchmarks.md、主张注册表 claims.md、文献库 papers/、教训例子层 review-lessons-examples.md
 - `skills/` — 可移植技能包（SKILL.md，project / custom / global 三作用域）
 - `tools/` — 自研工具 + 执行环境适配层（本地沙箱 / 远程 HPC）
 - `config/` — 环境无关配置（模型路由、权限策略、运行时契约 runtime-contract.md）

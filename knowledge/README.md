@@ -5,7 +5,7 @@ UnivEdge 的记录系统，agent 可读。与"生成"解耦：这里是**已核�
 
 ## 目录
 
-> **分层**：`conventions.md` 与 `review-lessons.md` 是**内核**（通用，随发布，GitHub 可见）；`review-lessons-examples.md`、`benchmarks.md`、`claims.md`、`papers/` 是**领域资产**（具体科研案例/数值/主张/文献核对记录，THZ 项目私有，已被 .gitignore 排除，不随公开内核发布；本地完整版保留）。
+> **分层**：`conventions.md` 与 `review-lessons.md` 是**内核**（通用，随发布，GitHub 可见）；`review-lessons-examples.md`、`benchmarks.md`、`claims.md`、`papers/` 是**领域资产**（具体科研案例/数值/主张/文献核对记录，THZ 项目私有，**非内核预置——由使用者按需自建**，已被 .gitignore 排除，不随公开内核发布；本地完整版保留）。
 
 | 文件 | 内容 | 关联 |
 |---|---|---|
