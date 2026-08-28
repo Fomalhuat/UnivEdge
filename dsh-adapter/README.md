@@ -9,7 +9,11 @@
 | 文件 | 作用 |
 |---|---|
 | `univedge-l1-inject.ts` | dsh 插件：监听 `agent/session-start`，读 UnivEdge L1 层（METHODOLOGY §0+§1 + review-lessons 基层），`agent.inject()` 注入 |
-| `cordis.patch.yml` | 注册插件的 patch（用 `--patch` 加载；"新增 entry"须用 `insert:` 语法） |
+| `univedge-hpc-gate.ts` | dsh 插件：注册 `submit_hpc_job` 工具——提交作业前强制 CHECK 字段校验（schema 层 `required` + execute 层非空校验双层门控） |
+| `univedge-reviewer.ts` | dsh 插件：任务完成后自动 spawn **独立评估者子 agent**（R7，怀疑派）审查产物，报告写入 `run/review/<主会话>/review.md` |
+| `analyze_session.py` | 协议遵守率统计脚本：解析 session.jsonl.zstd，输出 7 项指标（L0/L1/L2/工具代算/锚点） |
+| `cordis.patch.yml` | 注册以上插件的 patch（用 `--patch` 加载；"新增 entry"须用 `insert:` 语法） |
+| `test-runner.ts` + `test.patch.yml` | 测试专用：headless 主任务后不退出，轮询审查报告生成再退出（验证 reviewer 用） |
 
 ## 机制（分层）
 
@@ -54,8 +58,13 @@ dsh 的 bash 工具默认要求沙箱后端（bubblewrap/Landlock）来包装命
 - **L1 导航**：agent 主动 read `knowledge/conventions.md`（任务所需的约定），结论正确。
 - **L1 注入 + 完整方法论**：带 `--patch` 重跑，agent 产出完整任务契约（`run/y31-verify/contract.md`：启动自省 B1-B4+P 逐条、物理量定义、配置基线、副作用前核对清单）+ 四路线数值交叉验证 + 复核回写沉淀（benchmarks B8、review-lessons B2-4、conventions §1.1 补条目）。
 - **对比**：无 L1 时 agent 算对但无契约/自省；有 L1 时完整执行方法论全流程。
+- **L3-1 门控**：agent 少填字段调 `submit_hpc_job` → schema 层拒绝（双层门控，缺字段连提交环节都到不了）。
+- **L3-3 度量**：`analyze_session.py` 完美区分有/无 L1 注入的 session（契约/自省 ❌→✅）。
+- **L3-2 独立评估者**：任务完成自动 spawn 评估者（spawn provider，零父上下文）；报告逐条对照 VERIFICATION 检查项、独立重算（5 条代码路径）、L2 解耦声明。两轮实测：①Y₂¹ 验证 → "通过"（找不出实质问题）；②"2+2=4" 产物 → "需修订"（戳穿"追加保留先前记录"叙述与文件系统证据矛盾 + 状态自我升级 + 产物缺脚本）——**怀疑派立场成立**。
 
 ## 后续待办
 
 - 插件当前假设 UnivEdge 目录含 `METHODOLOGY.md` 与 `knowledge/review-lessons.md`；若结构变动需同步更新 `readL1()`。
 - L1 注入的触发是"会话启动"；如需"每步前重新注入"（应对上下文截断/长会话），可改挂 `agent/pre-step`（参考 dsh 的 `agent-instructions` 包实现）。
+- `univedge-reviewer` 的触发是 `turn/end`（headless 一次性进程会因进程退出而中断审查，Web 持续模式无此问题；`test-runner.ts` 专用于 headless 下验证完整链路）。
+- `submit_hpc_job` 待补：非法值测试 / 锚点完整性（ref 非空≠有参照）/ 正常提交冒烟。

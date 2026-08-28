@@ -3,3 +3,5 @@
       name: file:///data/home/hanwu/UnivEdge/dsh-adapter/univedge-l1-inject.ts
     - id: univedge-hpc-gate
       name: file:///data/home/hanwu/UnivEdge/dsh-adapter/univedge-hpc-gate.ts
+    - id: univedge-reviewer
+      name: file:///data/home/hanwu/UnivEdge/dsh-adapter/univedge-reviewer.ts
