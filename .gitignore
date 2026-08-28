@@ -1,3 +1,10 @@
 run/
 *.log
 .env
+
+# 领域资产（THZ 科研相关：教训例子、基准数值、验证主张、文献核对记录）
+# —— 不随公开内核发布；本地完整版保留。内核 = review-lessons.md 基层 + conventions.md 通用约定。
+knowledge/review-lessons-examples.md
+knowledge/benchmarks.md
+knowledge/claims.md
+knowledge/papers/
