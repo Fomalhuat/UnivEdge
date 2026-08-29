@@ -43,7 +43,8 @@ git clone https://github.com/Fomalhuat/UnivEdge <宿主目录>/UnivEdge
 cd <dsh 目录>                                  # 如 /data/home/hanwu/deepseek-harness
 source ~/.nvm/nvm.sh
 export DEEPSEEK_API_KEY='sk-xxx'
-pnpm dsh web --no-open --patch <UnivEdge>/dsh-adapter/cordis.patch.yml
+pnpm dsh web --patch <UnivEdge>/dsh-adapter/cordis.patch.yml --no-open
+# 注意：--patch 必须放在 --no-open 之前（dsh 参数透传机制）
 # SSH 端口转发：ssh -L 3080:127.0.0.1:3080 <user>@<host>，浏览器开 http://127.0.0.1:3080
 # 进入后：Settings→Models 配 key → Choose workspace 选 <UnivEdge 目录> → 开会话
 ```
