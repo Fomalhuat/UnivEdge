@@ -68,6 +68,21 @@ dsh 的 bash 工具默认要求沙箱后端（bubblewrap/Landlock）来包装命
 - **L4 双宿主对比（2026-08-29，任务：u^t=√(10/7) 计算，同一 prompt）**：WorkBuddy（干净基线，无 L1）vs dsh（L1 双时机）。结论：**数值两边等价（模型能力层），方法论遵守决定性差异（纪律层）**——WorkBuddy 无契约/无自省/无外部锚点/无状态机（"算对但裸奔"，一步问答完成），dsh 完整执行（契约 B1-B4+P 逐条 + 锚点 Wald/Hartle/Carroll + T1-T7 验证 + claimed 状态 + 五要素产物，26 步）。**L1 不是加能力，是加纪律。** 详细对比见 `run/l4-task1/report-l4-comparison.md`。
 - **长会话观察（L4 顺带）**：26 步/30 工具调用任务中 L1 全程在场（step 2-24 ✅）；compaction 未触发，"压缩后自动恢复"路径待真实长任务验证。
 
+### 测试阶梯总览（L0-L4，全绿 ✅）
+
+| 层 | 验证内容 | 状态 |
+|---|---|---|
+| L0 | 入口加载：AGENTS.md 自动注入，agent 识别内核 | ✅ |
+| L1 | 渐进披露导航：agent 主动读 conventions.md 等任务所需层 | ✅ |
+| L2 | 契约与自省：L1 注入后 agent 产出完整任务契约 + B1-B4+P 自省 | ✅ |
+| L3-1 | 门控：submit_hpc_job 双层 CHECK 校验（schema + 执行层） | ✅ |
+| L3-2 | 独立评估者（R7）：turn/end 自动 spawn，怀疑派审查成立 | ✅ |
+| L3-3 | 度量：analyze_session.py 7 项指标区分有无 L1 | ✅ |
+| L4 | 真实任务双宿主对比：数值等价 / 方法论纪律决定性差异 | ✅ |
+| 长会话 | L1 全程在场（26 步）；compaction 恢复路径 | ✅ / 待真实任务 |
+
+**结论**：dsh + UnivEdge 组合的完整验证链路闭环——"方法论的强制执行"从入口（L0）到纪律（L2）到能力（L3）到真实对比（L4）全部成立。真实使用中持续观察 compaction 恢复路径即可。
+
 ## 后续待办
 
 - 插件当前假设 UnivEdge 目录含 `METHODOLOGY.md` 与 `knowledge/review-lessons.md`；若结构变动需同步更新 `readL1()` / `readL1Brief()`。
