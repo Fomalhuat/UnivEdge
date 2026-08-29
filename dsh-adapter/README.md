@@ -8,7 +8,7 @@
 
 | 文件 | 作用 |
 |---|---|
-| `univedge-l1-inject.ts` | dsh 插件：监听 `agent/session-start`，读 UnivEdge L1 层（METHODOLOGY §0+§1 + review-lessons 基层），`agent.inject()` 注入 |
+| `univedge-l1-inject.ts` | dsh 插件：L1 双时机注入——`session-start` 全量（METHODOLOGY §0+§1 + 基层）+ `pre-step` 缺失时自动补精简版（长会话/compaction 保障） |
 | `univedge-hpc-gate.ts` | dsh 插件：注册 `submit_hpc_job` 工具——提交作业前强制 CHECK 字段校验（schema 层 `required` + execute 层非空校验双层门控） |
 | `univedge-reviewer.ts` | dsh 插件：任务完成后自动 spawn **独立评估者子 agent**（R7，怀疑派）审查产物，报告写入 `run/review/<主会话>/review.md` |
 | `analyze_session.py` | 协议遵守率统计脚本：解析 session.jsonl.zstd，输出 7 项指标（L0/L1/L2/工具代算/锚点） |
@@ -18,7 +18,11 @@
 ## 机制（分层）
 
 - **L0 入口地图**：dsh 原生自动加载 workspace 的 `AGENTS.md`（`agent-instructions` 包，每步前注入模型上下文）——这是 dsh 内置能力，不需要本适配层。
-- **L1 方法论层（本适配层负责）**：`univedge-l1-inject` 在会话启动时注入 METHODOLOGY §0+§1（任务契约模板、启动自省、配置基线、锚点原则）+ review-lessons 基层（B1-B4+P 五根因）。
+- **L1 方法论层（本适配层负责）**：`univedge-l1-inject` 注入 METHODOLOGY §0+§1（任务契约模板、启动自省、配置基线、锚点原则）+ review-lessons 基层（B1-B4+P 五根因）。
+- **双时机注入（长会话保障）**：
+  - `agent/session-start`：注入**全量 L1**（首步完整方法论）；
+  - `agent/pre-step`：每步前检查 L1 是否仍在模型可见上下文（session surface）——被 dsh 自动 compaction（token 压力/上下文溢出）影子化后**自动重新注入精简版**（基层 + 契约要点 + 产物格式，~25 行）。与 `agent-instructions`（AGENTS.md 每步注入）同模式；仅缺失时注入，避免每步重复的 token 成本。
+  - 实测（7 步任务）：全量 1 次 + 精简版 1 次（step 2 处 surface 时序竞争窗口补位，无害），step 3+ 去重生效零注入。
 - **workspace 发现**：插件用 `agent.session.header.cwd`（session 的 workspace）向上找含 `METHODOLOGY.md` 的目录（最多 16 层）；找不到则不注入（不干扰其他 workspace）。
 
 ## 用法（headless，AI/脚本）
