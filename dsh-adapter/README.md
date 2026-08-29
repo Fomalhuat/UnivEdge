@@ -27,7 +27,7 @@
 
 ## 安装（一次性，headless 与 Web 共用）
 
-patch 里插件的 `name` 是相对 dsh profile 目录的路径（可移植、无硬编码绝对路径），首次使用需把本目录符号链接到 dsh 的 profile 目录（`headless` 与 `web` 各建一次）：
+patch 里插件的 `name` 是相对 dsh profile 目录的路径（可移植、无硬编码绝对路径），首次使用需把本目录符号链接到 dsh 的 profile 目录（`headless` 与 `web` 各建一次）。`<UnivEdge>` 即你 clone 本仓库的位置，例如 `/data/home/hanwu/UnivEdge`：
 
 ```bash
 ln -sfn <UnivEdge>/dsh-adapter ~/.dsh/profiles/headless/dsh-adapter
