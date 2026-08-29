@@ -25,14 +25,16 @@
   - 实测（7 步任务）：全量 1 次 + 精简版 1 次（step 2 处 surface 时序竞争窗口补位，无害），step 3+ 去重生效零注入。
 - **workspace 发现**：插件用 `agent.session.header.cwd`（session 的 workspace）向上找含 `METHODOLOGY.md` 的目录（最多 16 层）；找不到则不注入（不干扰其他 workspace）。
 
-## 用法（headless，AI/脚本）
+## 安装（一次性，headless 与 Web 共用）
 
-**安装（一次性）**：patch 里插件的 `name` 是相对 dsh profile 目录的路径（可移植、无硬编码绝对路径），首次使用需把本目录符号链接到 dsh 的 profile 目录（`headless` 与 `web` 各建一次）：
+patch 里插件的 `name` 是相对 dsh profile 目录的路径（可移植、无硬编码绝对路径），首次使用需把本目录符号链接到 dsh 的 profile 目录（`headless` 与 `web` 各建一次）：
 
 ```bash
 ln -sfn <UnivEdge>/dsh-adapter ~/.dsh/profiles/headless/dsh-adapter
 ln -sfn <UnivEdge>/dsh-adapter ~/.dsh/profiles/web/dsh-adapter     # Web 模式用
 ```
+
+## 用法（headless，AI/脚本）
 
 **关键**：dsh headless 的 workspace = 启动目录（`process.cwd()` 硬编码，无参数覆盖）。要让 workspace 指向 UnivEdge，须在 UnivEdge 目录下启动，并加 `--tsconfig` 指向 dsh 的 tsconfig（否则 `@deepseek-ai/cordis` 解析到错误版本，报 `FiberState 导出缺失`）。
 
