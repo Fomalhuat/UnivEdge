@@ -61,7 +61,18 @@ dsh 的 bash 工具默认要求沙箱后端（bubblewrap/Landlock）来包装命
 
 ## Web 模式（人类使用）
 
-在 dsh 目录正常启动（`pnpm dsh web --no-open`，默认 3080，SSH 需端口转发），workspace 在 UI 里选（可任选 UnivEdge 目录）——无 headless 的 workspace 坑，也不需 `--tsconfig`（pnpm 正确处理依赖）。
+在 dsh 目录启动，**必须带 `--patch`**（否则只加载 AGENTS.md 的 L0，无 L1 注入/审查），且已装符号链接（见上方「安装」）：
+
+```bash
+cd <dsh 目录>
+source ~/.nvm/nvm.sh
+export DEEPSEEK_API_KEY='sk-xxx'
+pnpm dsh web --no-open --patch <UnivEdge>/dsh-adapter/cordis.patch.yml
+# SSH 端口转发：ssh -L 3080:127.0.0.1:3080 <user>@<host>，浏览器开 http://127.0.0.1:3080
+# 进入后：Settings→Models 配 key → Choose workspace 选 <UnivEdge 目录> → 开会话
+```
+
+workspace 在 UI 里选（可任选 UnivEdge 目录）——无 headless 的 workspace 坑，也不需 `--tsconfig`（pnpm 正确处理依赖）。
 
 ## 验证记录（2026-08-28）
 

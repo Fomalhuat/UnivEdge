@@ -37,13 +37,13 @@ git clone https://github.com/Fomalhuat/UnivEdge <宿主目录>/UnivEdge
 
 [dsh](https://github.com/deepseek-ai/deepseek-harness) 是 DeepSeek 开源的 agent 运行时（"Model + Harness = Agent"）。UnivEdge 通过 `dsh-adapter/` 适配层与 dsh 结合：harness 自动加载 `AGENTS.md`（L0），插件**双时机强制注入 L1 方法论层**（会话启动全量 + 每步前缺失自动补精简版，长会话/上下文压缩下仍保持方法论在场）——实测 agent 会据此产出完整任务契约（启动自省 B1-B4+P 逐条、物理量定义、配置基线）并完整执行验证流程，解决"agent 高强度工作时忘记加载协议"的问题。适配层还提供：`submit_hpc_job` 提交门控（L3-1）、独立审查评估者子 agent（R7，L3-2）、协议遵守率度量脚本（L3-3）。
 
-**人类使用（Web 模式）**：
+**人类使用（Web 模式）**——必须先做一次性安装（符号链接，见 [`dsh-adapter/README.md`](dsh-adapter/README.md)「安装」一节），启动时**必须带 `--patch`**（否则只加载 AGENTS.md 的 L0，无 L1 注入）：
 
 ```bash
 cd <dsh 目录>                                  # 如 /data/home/hanwu/deepseek-harness
 source ~/.nvm/nvm.sh
 export DEEPSEEK_API_KEY='sk-xxx'
-pnpm dsh web --no-open
+pnpm dsh web --no-open --patch <UnivEdge>/dsh-adapter/cordis.patch.yml
 # SSH 端口转发：ssh -L 3080:127.0.0.1:3080 <user>@<host>，浏览器开 http://127.0.0.1:3080
 # 进入后：Settings→Models 配 key → Choose workspace 选 <UnivEdge 目录> → 开会话
 ```
