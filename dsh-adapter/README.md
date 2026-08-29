@@ -68,7 +68,7 @@ dsh 的 bash 工具默认要求沙箱后端（bubblewrap/Landlock）来包装命
 
 ## 后续待办
 
-- 插件当前假设 UnivEdge 目录含 `METHODOLOGY.md` 与 `knowledge/review-lessons.md`；若结构变动需同步更新 `readL1()`。
-- L1 注入的触发是"会话启动"；如需"每步前重新注入"（应对上下文截断/长会话），可改挂 `agent/pre-step`（参考 dsh 的 `agent-instructions` 包实现）。
+- 插件当前假设 UnivEdge 目录含 `METHODOLOGY.md` 与 `knowledge/review-lessons.md`；若结构变动需同步更新 `readL1()` / `readL1Brief()`。
 - `univedge-reviewer` 的触发是 `turn/end`（headless 一次性进程会因进程退出而中断审查，Web 持续模式无此问题；`test-runner.ts` 专用于 headless 下验证完整链路）。
 - `submit_hpc_job` 待补：非法值测试 / 锚点完整性（ref 非空≠有参照）/ 正常提交冒烟。
+- pre-step 注入的长会话恢复路径（L1 被 compaction 影子化后自动补精简版）尚未在真实长会话中观测触发——逻辑已验证（surface 投影检查），建议未来长任务中留意。

@@ -2,6 +2,8 @@
 
 物理科研领域内核（Physics Research Domain Kernel）—— 把物理研究方法论工程化为可执行规范的可移植内核；注入宿主运行时（WorkBuddy / dsh（DeepSeek Harness）/ 独立 agent 外壳）即构成科研助手（agent），见 docs/06。
 
+**当前以 dsh（DeepSeek Harness）为主要特化宿主**：`dsh-adapter/` 适配层针对 dsh 提供了 L1 方法论强制注入（含长会话保障）、HPC 提交门控、独立审查评估者（R7）等组件，使内核在 dsh 下完整发挥（详见[与 dsh 结合](#与-dshdeepseek-harness-宿主结合推荐)一节）；其他宿主可复用内核 + 参考 `dsh-adapter/` 自行实现等价注入。
+
 ## 定位
 
 - **科研助手**：人类掌舵、agent 执行子任务、验证把关；不追求全自主科研循环。
@@ -28,12 +30,12 @@ git clone https://github.com/Fomalhuat/UnivEdge <宿主目录>/UnivEdge
 - **完整效果（L0 + L1）**：agent 产出完整任务契约（启动自省 B1-B4+P 逐条、物理量定义、配置基线、验证标准）并完整执行验证流程（实测，2026-08-28）。
 
 按宿主分：
-- **dsh（DeepSeek Harness）——推荐**：`dsh-adapter/` 插件在会话启动时**强制注入 L1 层**，见下节。
+- **dsh（DeepSeek Harness）——推荐**：`dsh-adapter/` 插件**双时机强制注入 L1 层**（会话启动全量 + 每步前缺失自动补精简版，应对长会话压缩），见下节。
 - **其他宿主**（WorkBuddy / Claude Code 等）：目前仅 L0（`AGENTS.md`），L1 靠 agent 自觉读 METHODOLOGY（效果打折）；如需完整效果，需实现等价的 L1 注入（可参考 `dsh-adapter/` 实现）。
 
 ## 与 dsh（DeepSeek Harness）宿主结合（推荐）
 
-[dsh](https://github.com/deepseek-ai/deepseek-harness) 是 DeepSeek 开源的 agent 运行时（"Model + Harness = Agent"）。UnivEdge 通过 `dsh-adapter/` 适配层与 dsh 结合：harness 自动加载 `AGENTS.md`（L0），插件在会话启动时**强制注入 L1 方法论层**——实测 agent 会据此产出完整任务契约（启动自省 B1-B4+P 逐条、物理量定义、配置基线）并完整执行验证流程，解决"agent 高强度工作时忘记加载协议"的问题。
+[dsh](https://github.com/deepseek-ai/deepseek-harness) 是 DeepSeek 开源的 agent 运行时（"Model + Harness = Agent"）。UnivEdge 通过 `dsh-adapter/` 适配层与 dsh 结合：harness 自动加载 `AGENTS.md`（L0），插件**双时机强制注入 L1 方法论层**（会话启动全量 + 每步前缺失自动补精简版，长会话/上下文压缩下仍保持方法论在场）——实测 agent 会据此产出完整任务契约（启动自省 B1-B4+P 逐条、物理量定义、配置基线）并完整执行验证流程，解决"agent 高强度工作时忘记加载协议"的问题。适配层还提供：`submit_hpc_job` 提交门控（L3-1）、独立审查评估者子 agent（R7，L3-2）、协议遵守率度量脚本（L3-3）。
 
 **人类使用（Web 模式）**：
 
@@ -52,7 +54,7 @@ Web 模式 workspace 在 UI 里选（可任选目录，含 UnivEdge），无 hea
 
 ## 状态
 
-- **内核已成型**。运行规范：`METHODOLOGY.md`（方法论规格 v0.4）与 `VERIFICATION.md`（验证协议 v0.3）——以这两个文件为准；`docs/` 为设计档案与变更史（记录设计决策与历次修订，不随内核同步更新）。
+- **内核已成型**。运行规范：`METHODOLOGY.md`（方法论规格 v0.8）与 `VERIFICATION.md`（验证协议 v0.6）——以这两个文件为准；`docs/` 为设计档案与变更史（记录设计决策与历次修订，不随内核同步更新）。
 - 文档见 `docs/`：01 文献调研 → 02 需求细化与蓝图修订 → 03 设计决策与架构约束 → 04 通用 Agent 调研与结构审查 → 07 内核复盘与改进方向（含 08-14 后续修订）。
 - 目录骨架已建：`knowledge/`（约定注册表 + 复核教训库）`skills/` `tools/` `config/`；`run/` 为宿主提供的产物存储（可插拔，Step 4B/4C 产物所在）。
 

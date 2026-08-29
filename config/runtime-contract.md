@@ -35,10 +35,15 @@
 - 加分项（可选）：能按角色（生成 vs 审查）路由不同模型，实现模型解耦；
 - 降级：不支持 R7 的宿主，怀疑派审查降级为单 agent 角色扮演（L1 伪解耦），
   产物须显式标注解耦等级（见 METHODOLOGY §5.1 三级解耦）。
+- **已实例化（dsh 宿主，2026-08-28）**：`dsh-adapter/univedge-reviewer.ts`——监听 `turn/end`
+  自动 spawn 独立评估者子 agent（spawn provider，零父上下文），输出报告至 `run/review/`；
+  实测逐条对照 VERIFICATION 检查项 + 独立代码路径重算（L2 上下文解耦，同模型不同档位）。
 
 ---
 
-## 附录：宿主满足度评估（当前：WorkBuddy 环境）
+## 附录：宿主满足度评估
+
+### WorkBuddy 环境（历史评估）
 
 | 条目 | 满足度 | 说明 |
 |---|---|---|
@@ -49,3 +54,15 @@
 | R5 | 部分 | 模型由宿主提供，路由策略待配置 |
 | R6 | 部分 | 日志可用，结构化需适配 |
 | R7 | 部分 | 子代理独立上下文 ✓；按角色路由不同模型 ✗（同模型不同档位）→ L2 上下文解耦 |
+
+### dsh（DeepSeek Harness）环境（2026-08 实测）
+
+| 条目 | 满足度 | 说明 |
+|---|---|---|
+| R1 | ✓ | bash 工具（沙箱可配，HPC 无沙箱后端时用 `DSH_PERMISSION_MODE=danger-full-access` 降级） |
+| R2 | 部分 | 工具权限由 sandbox 策略控制；UnivEdge 的 L2 副作用门控由 `submit_hpc_job` 工具（CHECK 字段强制）承载 |
+| R3 | ✓ | 原生上下文压缩（compaction-basic）；L1 注入带缺失自动恢复（pre-step） |
+| R4 | ✓ | session 持久化（`~/.dsh/sessions/` JSONL.zstd） |
+| R5 | ✓ | 模型路由（agentDefaultModel / provider 选择） |
+| R6 | ✓ | session 事件日志可审计（工具调用/注入/推理全记录） |
+| R7 | ✓ | 已实例化：`univedge-reviewer`（L2 上下文解耦，同模型不同档位） |
