@@ -50,7 +50,7 @@ pnpm dsh web --no-open
 
 Web 模式 workspace 在 UI 里选（可任选目录，含 UnivEdge），无 headless 的 workspace 坑。
 
-**AI/脚本使用（headless 模式）**：完整命令、参数与沙箱说明（`--patch` / `--tsconfig` / `DSH_PERMISSION_MODE`）见 [`dsh-adapter/README.md`](dsh-adapter/README.md)。
+**AI/脚本使用（headless 模式）**：完整命令、参数与沙箱说明（`--patch` / `--tsconfig` / `DSH_PERMISSION_MODE`）见 [`dsh-adapter/README.md`](dsh-adapter/README.md)。首次使用需把 `dsh-adapter/` 符号链接到 dsh 的 profile 目录（一次性安装，见该文档「安装」一节）。
 
 ## 状态
 

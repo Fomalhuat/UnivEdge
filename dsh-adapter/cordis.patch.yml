@@ -1,7 +1,10 @@
 - insert:
+    # name 为相对 profile 目录的路径（baseUrl = ~/.dsh/profiles/<profile>/）。
+    # 使用前需建立符号链接（一次性）：ln -s <UnivEdge>/dsh-adapter ~/.dsh/profiles/<profile>/dsh-adapter
+    # 详见 dsh-adapter/README.md「安装」一节。避免硬编码绝对路径（可移植性 + 不泄露服务器路径）。
     - id: univedge-l1
-      name: file:///data/home/hanwu/UnivEdge/dsh-adapter/univedge-l1-inject.ts
+      name: ./dsh-adapter/univedge-l1-inject.ts
     - id: univedge-hpc-gate
-      name: file:///data/home/hanwu/UnivEdge/dsh-adapter/univedge-hpc-gate.ts
+      name: ./dsh-adapter/univedge-hpc-gate.ts
     - id: univedge-reviewer
-      name: file:///data/home/hanwu/UnivEdge/dsh-adapter/univedge-reviewer.ts
+      name: ./dsh-adapter/univedge-reviewer.ts
