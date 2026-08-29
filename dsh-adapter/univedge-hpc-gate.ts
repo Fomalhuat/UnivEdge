@@ -34,7 +34,7 @@ export function apply(ctx: Context): void {
         peer: { type: 'string', description: '对端配置：对照实现是否与本次使用同一套参数（h/lmax/表范围等），写明核对结果' },
         table_range: { type: 'string', description: '表范围（如 t∈[0,T]，步长与层数）' },
         gl_nodes: { type: 'string', description: 'GL 节点数' },
-        extra_args: { type: 'string', description: '附加 sbatch 参数（如 --partition=r2 --time=24:00:00）' },
+        extra_args: { type: 'string', description: '附加 sbatch 参数（如 --partition=<queue> --time=24:00:00）' },
       },
       required: ['script_path', 'h', 'lmax', 'rp', 'ref', 'peer', 'table_range', 'gl_nodes'],
     },
