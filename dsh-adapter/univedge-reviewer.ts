@@ -19,12 +19,14 @@ const REVIEWER_DISABLED = process.env.UNIVEDGE_DISABLE_REVIEWER === '1'
 /** ② 熔断器：连续失败 N 次 → 自动禁用审查 X 分钟（防 token 不足雪崩）。 */
 const CIRCUIT_FAIL_THRESHOLD = 5
 const CIRCUIT_OPEN_MS = 15 * 60 * 1000
-/** ③ 硬限流：同一会话每天审查次数上限。 */
-const DAILY_REVIEW_LIMIT = 10
+/** ③ 硬限流：同一会话每小时审查次数上限（防单小时失控循环；正常高强度使用远低于此，环境变量可调）。
+ * 设计说明（handoff-reviewer-storm-cost 复核）：主防线是②熔断器（防失败雪崩）；限流只是冗余第二道，
+ * 阈值须宽松——正常审查 ~0.1 元/次不贵，卡正常使用是过度设计。 */
+const HOURLY_REVIEW_LIMIT = Number(process.env.UNIVEDGE_REVIEW_LIMIT_PER_HOUR ?? 20)
 
 let consecutiveFailures = 0
 let circuitOpenUntil = 0
-const dailyCounts = new Map<string, { day: string; count: number }>()
+const hourlyCounts = new Map<string, { hour: string; count: number }>()
 
 function recordFailure(): void {
   consecutiveFailures += 1
@@ -50,20 +52,20 @@ function circuitOpen(): boolean {
   return true
 }
 
-function underDailyLimit(sessionId: string): boolean {
-  const day = new Date().toISOString().slice(0, 10)
-  const rec = dailyCounts.get(sessionId)
-  if (!rec || rec.day !== day) {
-    dailyCounts.set(sessionId, { day, count: 0 })
+function underHourlyLimit(sessionId: string): boolean {
+  const hour = new Date().toISOString().slice(0, 13)
+  const rec = hourlyCounts.get(sessionId)
+  if (!rec || rec.hour !== hour) {
+    hourlyCounts.set(sessionId, { hour, count: 0 })
     return true
   }
-  return rec.count < DAILY_REVIEW_LIMIT
+  return rec.count < HOURLY_REVIEW_LIMIT
 }
 
 function countReview(sessionId: string): void {
-  const day = new Date().toISOString().slice(0, 10)
-  const rec = dailyCounts.get(sessionId)
-  if (!rec || rec.day !== day) dailyCounts.set(sessionId, { day, count: 1 })
+  const hour = new Date().toISOString().slice(0, 13)
+  const rec = hourlyCounts.get(sessionId)
+  if (!rec || rec.hour !== hour) hourlyCounts.set(sessionId, { hour, count: 1 })
   else rec.count += 1
 }
 
@@ -231,8 +233,8 @@ export function apply(ctx: Context): void {
       diag('turn', event.data?.turn, 'circuit open, skip review')
       return
     }
-    if (!underDailyLimit(session.id)) {
-      diag('turn', event.data?.turn, 'daily review limit reached, skip')
+    if (!underHourlyLimit(session.id)) {
+      diag('turn', event.data?.turn, 'hourly review limit reached, skip')
       return
     }
     // 触发判据：本 turn 有实质交付物才审查（无产物的讨论轮不触发）
