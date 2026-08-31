@@ -14,6 +14,7 @@
 | `analyze_session.py` | 协议遵守率统计脚本：解析 session.jsonl.zstd，输出 7 项指标（L0/L1/L2/工具代算/锚点） |
 | `cordis.patch.yml` | 注册以上插件的 patch（用 `--patch` 加载；"新增 entry"须用 `insert:` 语法） |
 | `test-runner.ts` + `test.patch.yml` | 测试专用：headless 主任务后不退出，轮询审查报告生成再退出（验证 reviewer 用） |
+| `tests/reviewer-deliverable.mjs` + `test-results/` | reviewer 触发判据单元测试（hasDeliverable 等价复现，8 用例）+ 落盘结果（如 `test-results/2026-08-31-reviewer-deliverable.md`）——运行 `node tests/reviewer-deliverable.mjs`；"8/8 通过"声明的可核产物 |
 
 ## 机制（分层）
 
