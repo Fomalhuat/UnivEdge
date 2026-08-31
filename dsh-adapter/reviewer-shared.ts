@@ -110,16 +110,19 @@ export function reviewIndexPath(root: string): string {
   return `${root}/${REVIEW_DIR}/INDEX.md`
 }
 
-/** 追加审查索引记录（时间/主会话/评估者/结论/关联任务/报告路径）。
+/** 追加审查索引记录（时间/主会话/评估者/结论/触发通道/关联任务/报告路径）。
  * S1-1 修复：首次创建用排他标志 wx（EEXIST 回退 append）——并发首写不丢记录；
  * S1-2 修复：函数内自建父目录 + 失败返回 false（由调用方记录，不静默吞）。
+ * 触发通道列（2026-08-31 selfcheck S2，观察期统计用）：declared=@review 声明 / auto=自动嗅探；
+ * 历史记录无 channel 字段时缺省标 auto（统计兼容旧行）。
  * 返回 true=成功写入，false=失败（调用方应 diag）。 */
-export function appendReviewIndex(root: string, rec: { mainId: string; childId: string; conclusion: string; task?: string; reportPath: string }): boolean {
+export function appendReviewIndex(root: string, rec: { mainId: string; childId: string; conclusion: string; task?: string; reportPath: string; channel?: string }): boolean {
   try {
     const file = reviewIndexPath(root)
     mkdirSync(dirname(file), { recursive: true }) // S1-2：自建父目录（不依赖调用顺序）
-    const line = `| ${new Date().toISOString().slice(0, 19)} | ${String(rec.mainId).replace(/^session-/, '').slice(0, 8)} | ${String(rec.childId).replace(/^session-/, '').slice(0, 8)} | ${rec.conclusion} | ${rec.task ?? '—'} | ${rec.reportPath} |`
-    const header = '# 审查索引（管理入口）\n\n> 每次审查落盘自动追加；按时间/任务/结论检索；时间=UTC；路径相对 UnivEdge 根；空报告也记录（结论=空）。\n\n| 时间 | 主会话 | 评估者 | 结论 | 关联任务 | 报告路径 |\n|---|---|---|---|---|---|\n'
+    const channel = rec.channel ?? 'auto'
+    const line = `| ${new Date().toISOString().slice(0, 19)} | ${String(rec.mainId).replace(/^session-/, '').slice(0, 8)} | ${String(rec.childId).replace(/^session-/, '').slice(0, 8)} | ${rec.conclusion} | ${channel} | ${rec.task ?? '—'} | ${rec.reportPath} |`
+    const header = '# 审查索引（管理入口）\n\n> 每次审查落盘自动追加；按时间/任务/结论检索；时间=UTC；路径相对 UnivEdge 根；空报告也记录（结论=空）；触发通道：declared=@review 声明 / auto=自动嗅探。\n\n| 时间 | 主会话 | 评估者 | 结论 | 触发通道 | 关联任务 | 报告路径 |\n|---|---|---|---|---|---|---|\n'
     try {
       writeFileSync(file, header + line + '\n', { flag: 'wx', encoding: 'utf8' }) // S1-1：排他创建
     } catch (e: any) {

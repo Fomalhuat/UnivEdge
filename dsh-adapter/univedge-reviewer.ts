@@ -414,7 +414,7 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
     // 缺陷 2：空报告显式落盘（含 childId/时间/turn 窗口），而非静默 return——供诊断 token/速率限制
     diag('no report text, persisting empty-report record')
     recordFailure() // ④ 失败计数（空报告 = 失败，token 不足信号）
-    persistEmpty(root, session, childId, startSeq, endSeq)
+    persistEmpty(root, session, childId, startSeq, endSeq, channel)
     return
   }
 
@@ -445,22 +445,25 @@ function persistReport(root: string, session: any, childId: string, report: stri
     conclusion: extractConclusion(report),
     task,
     reportPath: `${REVIEW_DIR}/${String(session.id).replace(/^session-/, '').slice(0, 8)}/${String(childId).replace(/^session-/, '').slice(0, 8)}/review.md`,
+    channel, // S2（2026-08-31）：索引记录触发通道——观察期统计 A/B/C 直接读 INDEX.md 一列，免遍历报告头
   })
 }
 
-/** 空报告/中止记录落盘（缺陷 2 + 缺陷 6）+ 入索引（S2-1：审查失败在索引可见）。 */
-function persistEmpty(root: string, session: any, childId: string, startSeq?: number, endSeq?: number): void {
+/** 空报告/中止记录落盘（缺陷 2 + 缺陷 6）+ 入索引（S2-1：审查失败在索引可见）。
+ * channel 参数（2026-08-31）：空报告记录同样标注触发通道——观察期统计不受"失败样本"干扰。 */
+function persistEmpty(root: string, session: any, childId: string, startSeq?: number, endSeq?: number, channel = 'auto'): void {
   const shortChild = String(childId).replace(/^session-/, '').slice(0, 8)
   const emptyDir = emptyOutDir(root, session.id)
   mkdirSync(emptyDir, { recursive: true })
   const file = join(emptyDir, `${shortChild}.md`)
   writeFileSync(file,
-    `# 空报告记录\n\n- 主会话: ${session.id}\n- 评估者会话: ${childId}\n- 时间: ${new Date().toISOString()}\n- turn 窗口: ${startSeq}-${endSeq}\n- 状态: 评估者结束但未产出文本（可能 token 额度/速率限制或超时中止）\n`, 'utf8')
+    `# 空报告记录\n\n- 主会话: ${session.id}\n- 评估者会话: ${childId}\n- 触发通道: ${channel}\n- 时间: ${new Date().toISOString()}\n- turn 窗口: ${startSeq}-${endSeq}\n- 状态: 评估者结束但未产出文本（可能 token 额度/速率限制或超时中止）\n`, 'utf8')
   appendReviewIndex(root, {
     mainId: session.id,
     childId,
     conclusion: '（空）',
     reportPath: `${REVIEW_DIR}/${String(session.id).replace(/^session-/, '').slice(0, 8)}/empty/${shortChild}.md`,
+    channel,
   })
 }
 
@@ -500,12 +503,12 @@ async function collectLateReport(ctx: Context, root: string, session: any, child
     } else {
       diag('late turn/end but no report text, persisting empty')
       recordFailure()
-      persistEmpty(root, session, childId, startSeq, endSeq)
+      persistEmpty(root, session, childId, startSeq, endSeq, channel)
     }
   } catch {
     // 3) 迟到超时仍无报告 → 落盘"中止"记录（可诊断）
     diag('late report timeout, persisting abort record')
     recordFailure()
-    persistEmpty(root, session, childId, startSeq, endSeq)
+    persistEmpty(root, session, childId, startSeq, endSeq, channel)
   }
 }

@@ -103,16 +103,21 @@ import { join } from 'node:path'
 {
   const tmp = mkdtempSync(join(tmpdir(), 'reviewer-idx-'))
   try {
-    const rec1 = { mainId: 'session-aaaa1111-0000', childId: 'session-bbbb2222-0000', conclusion: '需修订', task: 'step4a', reportPath: 'run/review/aaaa1111/bbbb2222/review.md' }
-    const rec2 = { mainId: 'session-aaaa1111-0000', childId: 'session-cccc3333-0000', conclusion: '（空）', reportPath: 'run/review/aaaa1111/empty/cccc3333.md' }
+    const rec1 = { mainId: 'session-aaaa1111-0000', childId: 'session-bbbb2222-0000', conclusion: '需修订', task: 'step4a', reportPath: 'run/review/aaaa1111/bbbb2222/review.md', channel: 'declared' }
+    const rec2 = { mainId: 'session-aaaa1111-0000', childId: 'session-cccc3333-0000', conclusion: '（空）', reportPath: 'run/review/aaaa1111/empty/cccc3333.md', channel: 'auto' }
     const ok1 = appendReviewIndex(tmp, rec1)
     const ok2 = appendReviewIndex(tmp, rec2)
     const content = readFileSync(join(tmp, 'run', 'review', 'INDEX.md'), 'utf8')
     check('INDEX 首次创建成功', ok1, true, 'S1-1')
     check('INDEX 追加成功', ok2, true, 'S1-1')
-    check('INDEX 表头含时间/任务/结论列', content.includes('| 时间 | 主会话 | 评估者 | 结论 | 关联任务 | 报告路径 |'), true, 'S2-4')
+    check('INDEX 表头含触发通道列', content.includes('| 时间 | 主会话 | 评估者 | 结论 | 触发通道 | 关联任务 | 报告路径 |'), true, 'S2-4')
     check('INDEX 含两条记录', content.split('\n').filter((l) => l.startsWith('| 20')).length, 2, 'S2-4')
     check('INDEX 记录含任务名与结论', content.includes('step4a') && content.includes('需修订') && content.includes('（空）'), true, 'S2-4')
+    check('INDEX 通道列记录 declared/auto', content.includes('| declared |') && content.includes('| auto |'), true, 'S2-4')
+    // 缺省 channel（历史调用不传字段）→ 缺省标 auto（旧记录统计兼容）
+    appendReviewIndex(tmp, { mainId: 'session-aaaa1111-0000', childId: 'session-dddd4444-0000', conclusion: '通过', reportPath: 'run/review/aaaa1111/dddd4444/review.md' })
+    const content3 = readFileSync(join(tmp, 'run', 'review', 'INDEX.md'), 'utf8')
+    check('INDEX 无 channel 字段记录缺省 auto（历史兼容）', content3.includes('| 通过 | auto | — |'), true, 'S2-4')
     // 并发首写模拟：清空后两个排他创建竞争（wx flag 保证不互相覆盖丢记录）
     rmSync(join(tmp, 'run', 'review', 'INDEX.md'))
     appendReviewIndex(tmp, rec1)
