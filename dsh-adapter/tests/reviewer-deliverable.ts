@@ -29,7 +29,7 @@ check('write 任意 .md（非 run/）', isArtifactPath('notes/summary.md'), true
 check('写审计自输出：run/review/<主>/<评估者>/review.md', isArtifactPath('run/review/9e496951/9546ca98/review.md'), false, '自输出')
 check('单层旧格式槽：run/review/<主>/review.md（完善项 1）', isArtifactPath('run/review/9e496951/review.md'), false, '完善项1')
 check('写空报告记录：run/review/<主>/empty/', isArtifactPath('run/review/9e496951/empty/9546ca98.md'), false, '自输出')
-check('写 selfcheck 输入包：run/review-selfcheck/input.md', isArtifactPath('run/review-selfcheck/input.md'), false, 'S1-5')
+check('写 selfcheck 输入包：run/review/selfcheck/input.md（S2-5 后旧 review-selfcheck 前缀不再特殊）', isArtifactPath('run/review/selfcheck/input.md'), false, 'S1-5')
 check('写 handoff：run/review/handoff-bc.md（重新进入审查面）', isArtifactPath('run/review/handoff-bc.md'), true, 'S1-1')
 check('run/review-test2/ 产物前缀不误伤', isArtifactPath('run/review-test2/conclusion.md'), true, '边界')
 
@@ -92,13 +92,42 @@ check('结论提取（通过）', extractConclusion('## 结论：通过\n无 S0'
 check('结论提取（未知）', extractConclusion('无结论字段的报告'), '（未知）', '索引')
 check('索引路径', reviewIndexPath('/home/u/UnivEdge'), '/home/u/UnivEdge/run/review/INDEX.md', '索引')
 
+// ---------- 8. appendReviewIndex 行为（S2-4：创建/追加/表头/并发首写） ----------
+import { appendReviewIndex } from '../reviewer-shared'
+import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+{
+  const tmp = mkdtempSync(join(tmpdir(), 'reviewer-idx-'))
+  try {
+    const rec1 = { mainId: 'session-aaaa1111-0000', childId: 'session-bbbb2222-0000', conclusion: '需修订', task: 'step4a', reportPath: 'run/review/aaaa1111/bbbb2222/review.md' }
+    const rec2 = { mainId: 'session-aaaa1111-0000', childId: 'session-cccc3333-0000', conclusion: '（空）', reportPath: 'run/review/aaaa1111/empty/cccc3333.md' }
+    const ok1 = appendReviewIndex(tmp, rec1)
+    const ok2 = appendReviewIndex(tmp, rec2)
+    const content = readFileSync(join(tmp, 'run', 'review', 'INDEX.md'), 'utf8')
+    check('INDEX 首次创建成功', ok1, true, 'S1-1')
+    check('INDEX 追加成功', ok2, true, 'S1-1')
+    check('INDEX 表头含时间/任务/结论列', content.includes('| 时间 | 主会话 | 评估者 | 结论 | 关联任务 | 报告路径 |'), true, 'S2-4')
+    check('INDEX 含两条记录', content.split('\n').filter((l) => l.startsWith('| 20')).length, 2, 'S2-4')
+    check('INDEX 记录含任务名与结论', content.includes('step4a') && content.includes('需修订') && content.includes('（空）'), true, 'S2-4')
+    // 并发首写模拟：清空后两个排他创建竞争（wx flag 保证不互相覆盖丢记录）
+    rmSync(join(tmp, 'run', 'review', 'INDEX.md'))
+    appendReviewIndex(tmp, rec1)
+    appendReviewIndex(tmp, rec2) // 第二个走 EEXIST → append
+    const content2 = readFileSync(join(tmp, 'run', 'review', 'INDEX.md'), 'utf8')
+    check('并发首写场景两条记录不丢（wx 排他 + EEXIST 回退）', content2.split('\n').filter((l) => l.startsWith('| 20')).length, 2, 'S1-1')
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+}
+
 // ---------- 输出 ----------
 const lines = [
   '# reviewer 逻辑单元测试结果（shared 模块）',
   '',
   `- 日期：${new Date().toISOString().slice(0, 10)}`,
   '- 命令：`tsx --tsconfig <dsh>/tsconfig.json tests/reviewer-deliverable.ts`',
-  '- 覆盖：触发判据（A/B 层）+ 缺陷 2/3/4 + S1-1/S1-4/S1-5 + S2-2 + 共享模块单一事实来源（S1-2）',
+  '- 覆盖：触发判据（A/B 层）+ 缺陷 2/3/4 + S1-1/S1-4/S1-5 + S2-2 + INDEX 创建/追加/并发 + 共享模块单一事实来源（S1-2）',
   '',
   '| 用例 | 期望 | 实测 | 关联 |',
   '|---|---|---|---|',

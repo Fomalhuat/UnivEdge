@@ -356,13 +356,21 @@ function persistReport(root: string, session: any, childId: string, report: stri
   })
 }
 
-/** 空报告/中止记录落盘（缺陷 2 + 缺陷 6）。 */
+/** 空报告/中止记录落盘（缺陷 2 + 缺陷 6）+ 入索引（S2-1：审查失败在索引可见）。 */
 function persistEmpty(root: string, session: any, childId: string, startSeq?: number, endSeq?: number): void {
   const shortChild = String(childId).replace(/^session-/, '').slice(0, 8)
   const emptyDir = emptyOutDir(root, session.id)
   mkdirSync(emptyDir, { recursive: true })
-  writeFileSync(join(emptyDir, `${shortChild}.md`),
+  const file = join(emptyDir, `${shortChild}.md`)
+  writeFileSync(file,
     `# 空报告记录\n\n- 主会话: ${session.id}\n- 评估者会话: ${childId}\n- 时间: ${new Date().toISOString()}\n- turn 窗口: ${startSeq}-${endSeq}\n- 状态: 评估者结束但未产出文本（可能 token 额度/速率限制或超时中止）\n`, 'utf8')
+  appendReviewIndex(root, {
+    mainId: session.id,
+    childId,
+    conclusion: '（空）',
+    reportPath: `${REVIEW_DIR}/${String(session.id).replace(/^session-/, '').slice(0, 8)}/empty/${shortChild}.md`,
+  })
+}
 }
 
 /** 缺陷 6：超时中止后回收迟到报告——先查当前会话事件（竞态窗口），再挂迟到监听（限时 5 分钟），

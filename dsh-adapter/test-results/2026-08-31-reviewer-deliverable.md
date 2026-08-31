@@ -2,7 +2,7 @@
 
 - 日期：2026-08-31
 - 命令：`tsx --tsconfig <dsh>/tsconfig.json tests/reviewer-deliverable.ts`
-- 覆盖：触发判据（A/B 层）+ 缺陷 2/3/4 + S1-1/S1-4/S1-5 + S2-2 + 共享模块单一事实来源（S1-2）
+- 覆盖：触发判据（A/B 层）+ 缺陷 2/3/4 + S1-1/S1-4/S1-5 + S2-2 + INDEX 创建/追加/并发 + 共享模块单一事实来源（S1-2）
 
 | 用例 | 期望 | 实测 | 关联 |
 |---|---|---|---|
@@ -12,7 +12,7 @@
 | 写审计自输出：run/review/<主>/<评估者>/review.md | false | false | 自输出 | ✅ |
 | 单层旧格式槽：run/review/<主>/review.md（完善项 1） | false | false | 完善项1 | ✅ |
 | 写空报告记录：run/review/<主>/empty/ | false | false | 自输出 | ✅ |
-| 写 selfcheck 输入包：run/review-selfcheck/input.md | false | false | S1-5 | ✅ |
+| 写 selfcheck 输入包：run/review/selfcheck/input.md（S2-5 后旧 review-selfcheck 前缀不再特殊） | false | false | S1-5 | ✅ |
 | 写 handoff：run/review/handoff-bc.md（重新进入审查面） | true | true | S1-1 | ✅ |
 | run/review-test2/ 产物前缀不误伤 | true | true | 边界 | ✅ |
 | 未来式规划句 | false | false | L1-2 | ✅ |
@@ -52,5 +52,11 @@ S0 问题清单……
 | 结论提取（通过） | 通过 | 通过 | 索引 | ✅ |
 | 结论提取（未知） | （未知） | （未知） | 索引 | ✅ |
 | 索引路径 | /home/u/UnivEdge/run/review/INDEX.md | /home/u/UnivEdge/run/review/INDEX.md | 索引 | ✅ |
+| INDEX 首次创建成功 | true | true | S1-1 | ✅ |
+| INDEX 追加成功 | true | true | S1-1 | ✅ |
+| INDEX 表头含时间/任务/结论列 | true | true | S2-4 | ✅ |
+| INDEX 含两条记录 | 2 | 2 | S2-4 | ✅ |
+| INDEX 记录含任务名与结论 | true | true | S2-4 | ✅ |
+| 并发首写场景两条记录不丢（wx 排他 + EEXIST 回退） | 2 | 2 | S1-1 | ✅ |
 
-**34/34 通过, 0 失败**
+**40/40 通过, 0 失败**

@@ -1,7 +1,8 @@
 /**
  * univedge-reviewer 共享逻辑（单一事实来源——源码与测试共同 import，防常量/逻辑漂移，S1-2 闭合）
  */
-import { existsSync, writeFileSync, appendFileSync } from 'node:fs'
+import { existsSync, writeFileSync, appendFileSync, mkdirSync } from 'node:fs'
+import { dirname } from 'node:path'
 
 /** 审查自输出语义（用户裁定 2026-08-31）：
  * - run/ 顶层只两类：**review/**（审查系统全部产物）与 **<任务名>/**（任务工作区）；任务名不得前缀 review-
@@ -26,8 +27,8 @@ export function isReviewSelfOutput(p: string): boolean {
   if (new RegExp(`${REVIEW_DIR}/${HEX8}/empty/`).test(p)) return true
   // 审查自检产物：run/review/selfcheck/（2026-08-31 起自检产物迁入 review/ 下）
   if (p.includes(`${REVIEW_DIR}/selfcheck`)) return true
-  // 旧自检目录（历史兼容，清理后不再命中）
-  if (p.includes('run/review-selfcheck')) return true
+  // 审查索引文件（S2-8：review/ 下产物语义闭合——INDEX.md 是插件写的管理入口）
+  if (p.includes(`${REVIEW_DIR}/INDEX.md`)) return true
   return false
 }
 
@@ -82,13 +83,15 @@ export function pickReport(events: any[]): string {
   return best
 }
 
-/** 从报告文本提取结论（通过/需修订/不通过；找不到标未知）。 */
+/** 从报告文本提取结论（通过/需修订/不通过；先剥 markdown 强调，找不到标未知）。 */
 export function extractConclusion(report: string): string {
-  const m = report.match(/结论[:：]\s*(通过|需修订|不通过)/)
+  const plain = report.replace(/\*\*/g, '') // S2-2：剥 markdown 加粗（## **结论**：需修订 也能提取）
+  const m = plain.match(/结论[:：]\s*(通过|需修订|不通过)/)
   return m ? m[1] : '（未知）'
 }
 
-/** 从产物路径提取任务名（run/<任务名>/ 前缀；取最后匹配=当前活动任务；review 前缀不算任务名）。 */
+/** 从产物路径提取任务名（run/<任务名>/ 前缀；取最后匹配=当前活动任务；review 前缀不算任务名）。
+ * 注意（S2-3）：仅用于索引的"关联任务"字段（非权威归属），多任务轮归最后写入者；勿据此做文件迁移。 */
 export function extractTaskName(paths: string[]): string | undefined {
   let task: string | undefined
   for (const p of paths) {
@@ -103,15 +106,28 @@ export function reviewIndexPath(root: string): string {
   return `${root}/${REVIEW_DIR}/INDEX.md`
 }
 
-/** 追加审查索引记录（时间/主会话/评估者/结论/关联任务/报告路径）。 */
-export function appendReviewIndex(root: string, rec: { mainId: string; childId: string; conclusion: string; task?: string; reportPath: string }): void {
+/** 追加审查索引记录（时间/主会话/评估者/结论/关联任务/报告路径）。
+ * S1-1 修复：首次创建用排他标志 wx（EEXIST 回退 append）——并发首写不丢记录；
+ * S1-2 修复：函数内自建父目录 + 失败返回 false（由调用方记录，不静默吞）。
+ * 返回 true=成功写入，false=失败（调用方应 diag）。 */
+export function appendReviewIndex(root: string, rec: { mainId: string; childId: string; conclusion: string; task?: string; reportPath: string }): boolean {
   try {
     const file = reviewIndexPath(root)
+    mkdirSync(dirname(file), { recursive: true }) // S1-2：自建父目录（不依赖调用顺序）
     const line = `| ${new Date().toISOString().slice(0, 19)} | ${String(rec.mainId).replace(/^session-/, '').slice(0, 8)} | ${String(rec.childId).replace(/^session-/, '').slice(0, 8)} | ${rec.conclusion} | ${rec.task ?? '—'} | ${rec.reportPath} |`
-    if (existsSync(file)) {
-      appendFileSync(file, line + '\n', 'utf8')
-    } else {
-      writeFileSync(file, `# 审查索引（管理入口）\n\n> 每次审查落盘自动追加；按时间/任务/结论检索；原始报告在 run/review/<主会话>/<评估者>/review.md。\n\n| 时间 | 主会话 | 评估者 | 结论 | 关联任务 | 报告路径 |\n|---|---|---|---|---|---|\n${line}\n`, 'utf8')
+    const header = '# 审查索引（管理入口）\n\n> 每次审查落盘自动追加；按时间/任务/结论检索；时间=UTC；路径相对 UnivEdge 根；空报告也记录（结论=空）。\n\n| 时间 | 主会话 | 评估者 | 结论 | 关联任务 | 报告路径 |\n|---|---|---|---|---|---|\n'
+    try {
+      writeFileSync(file, header + line + '\n', { flag: 'wx', encoding: 'utf8' }) // S1-1：排他创建
+    } catch (e: any) {
+      if (e?.code === 'EEXIST') {
+        appendFileSync(file, line + '\n', 'utf8') // 已存在 → 追加（O_APPEND 行级原子）
+      } else {
+        throw e
+      }
     }
-  } catch { /* ignore */ }
+    return true
+  } catch (e) {
+    try { console.error(`[univedge-reviewer] appendReviewIndex failed: ${String(e)}`) } catch { /* ignore */ }
+    return false
+  }
 }
