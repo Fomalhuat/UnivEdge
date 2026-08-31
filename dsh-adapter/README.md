@@ -26,7 +26,7 @@
   - 实测（7 步任务）：全量 1 次 + 精简版 1 次（step 2 处 surface 时序竞争窗口补位，无害），step 3+ 去重生效零注入。
 - **workspace 发现**：插件用 `agent.session.header.cwd`（session 的 workspace）向上找含 `METHODOLOGY.md` 的目录（最多 16 层）；找不到则不注入（不干扰其他 workspace）。
 - **审查风暴抑制**（reviewer 附带，2026-08-31 review-storm-diagnosis 修复）：触发判据只问"有无交付物"不问"是否已被审过"，导致 审查→修订→审查 反馈环（2h 6 次审查）。补三层感知：**冷却期**（同主会话滑动窗口内成功审查 ≥`UNIVEDGE_REVIEW_MAX_PER_WINDOW`（默认 2）次 → 暂停自动审查 `UNIVEDGE_REVIEW_COOLDOWN_MIN`（默认 15）分钟，延迟不丢弃）；**hash 去重**（产物内容与上次被审时全同 → 跳过）；**quiet 指令**（turn 文本含 `--no-review` / `review:off` → 跳过，替代全关硬开关）。判定逻辑均为 `reviewer-shared.ts` 纯函数（可单测），`univedge-reviewer.ts` 只维护状态。检查顺序：熔断 → 限流 → quiet → **声明通道（@review 必审）** → 自动判据 → 冷却 → hash → 触发。
-- **显式审查点**（2026-08-31 framework-redesign 方向 1，双通道并存观察期）：复杂度根源 = 自动嗅探判据在猜测"是否完成且值得审"（任务状态，不在事件流里），启发式不精确 → 过滤器叠加螺旋（风暴抑制五件套中冷却/hash 正是为此买单）。理念反转：**审查由声明驱动**——主 agent 交付时在回复文本写 `@review <路径>`（专有标记，与自然语言混淆概率低一个量级）即触发必审；会话结束兜底留待切换期实现。观察期双通道并存：报告头标 `触发通道: declared/auto`，对比触发量与覆盖后再退役自动通道（届时删除 hasDeliverable 启发式 + 冷却 + hash）。
+- **显式审查点**（2026-08-31 framework-redesign 方向 1，双通道并存观察期）：复杂度根源 = 自动嗅探判据在猜测"是否完成且值得审"（任务状态，不在事件流里），启发式不精确 → 过滤器叠加螺旋（风暴抑制五件套中冷却/hash 正是为此买单）。理念反转：**审查由"完成宣告"驱动，不由"写入文件"驱动**——主 agent 在产物达到 **claimed**（完成态、可被独立验证）时以 `@review <路径>` 宣告审查请求（专有标记；可列多路径清单）；**响应审查意见的修订不自动重宣**（修订 ≠ 重新完成——风暴结构性消失）；quiet 指令 `--no-review` / `review:off` 声明本轮不审查。**方法论已内化**：本语义写入 `METHODOLOGY.md §1.7`（位于 L1 注入段 §0–§1，随 `univedge-l1-inject.ts` 自动注入主 agent——外部用户拿到仓库同样生效，观察期 A 指标 = 主 agent 文档遵守率，非用户提醒率）；`VERIFICATION.md §3.4` 指向其触发语义。会话结束兜底留待观察期结束切换时实现。观察期双通道并存：报告头标 `触发通道: declared/auto`，对比触发量与覆盖后再退役自动通道（届时删除 hasDeliverable 启发式 + 冷却 + hash）。
 
 ## 安装（一次性，headless 与 Web 共用）
 
