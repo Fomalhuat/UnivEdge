@@ -371,7 +371,6 @@ function persistEmpty(root: string, session: any, childId: string, startSeq?: nu
     reportPath: `${REVIEW_DIR}/${String(session.id).replace(/^session-/, '').slice(0, 8)}/empty/${shortChild}.md`,
   })
 }
-}
 
 /** 缺陷 6：超时中止后回收迟到报告——先查当前会话事件（竞态窗口），再挂迟到监听（限时 5 分钟），
  * 仍无报告则落盘"中止"记录。杜绝"wait failed 后直接 return"导致的迟到完整报告静默丢失。 */
