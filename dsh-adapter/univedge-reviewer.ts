@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport, extractTaskName, extractConclusion, appendReviewIndex, REVIEW_DIR, hasQuietDirective, allArtifactsUnchanged, shouldCooldown, contentHash } from './reviewer-shared.ts'
+import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport, extractTaskName, extractConclusion, appendReviewIndex, REVIEW_DIR, hasQuietDirective, allArtifactsUnchanged, shouldCooldown, contentHash, scanTurnDeclarations } from './reviewer-shared.ts'
 
 /** 诊断日志（临时，定位后移除）。 */
 function diag(...args: any[]): void {
@@ -100,11 +100,13 @@ function findUnivEdgeRoot(start: string | undefined): string | undefined {
   return undefined
 }
 
-/** 提取审查输入包：任务描述 + 最终回复（窗口化——L2-5）+ 产物路径（含读取时刻——完善项 2/3a）。 */
-function extractReviewInput(session: any, startSeq = 0, endSeq = Number.MAX_SAFE_INTEGER): { task: string; finalReply: string; artifacts: string[]; snapshotAt: string } {
+/** 提取审查输入包：任务描述 + 最终回复（窗口化——L2-5）+ 产物路径（含读取时刻——完善项 2/3a）。
+ * P1 声明通道：declaredPaths 优先并入 artifacts（主 agent @review 声明的路径是权威审查对象），
+ * 原有 tool/call 正则提取作为补充（观察期自动通道产物仍要可见）。 */
+function extractReviewInput(session: any, startSeq = 0, endSeq = Number.MAX_SAFE_INTEGER, declaredPaths: string[] = []): { task: string; finalReply: string; artifacts: string[]; snapshotAt: string } {
   let task = ''
   let finalReply = ''
-  const artifacts = new Set<string>()
+  const artifacts = new Set<string>(declaredPaths)
   const cwd = session?.header?.cwd ?? ''
   const evts = session?.events ?? []
   for (const ev of evts) {
@@ -298,11 +300,21 @@ export function apply(ctx: Context): void {
       diag('turn', turn, 'quiet directive (--no-review / review:off), skip review')
       return
     }
+    // ---- 显式审查点（2026-08-31 framework-redesign 方向 1，双通道并存观察期）----
+    // P1 声明通道：turn 内文本含 @review <路径> → 必审（不受冷却/hash 约束——显式声明是意志信号，
+    // 与"响应审查的修订"无关；节奏交还主 agent/用户）。观察期后自动通道退役，此通道成为主判据。
+    const declared = scanTurnDeclarations(session?.events ?? [], startSeq, endSeq)
+    if (declared.length > 0) {
+      diag('turn', turn, `declared review via @review: ${declared.join(', ')}`)
+      countReview(session.id)
+      void runReview(ctx, session, turn, startSeq, endSeq, declared)
+      return
+    }
     if (!hasDeliverable(session, startSeq, endSeq)) {
       diag('turn', turn, 'no deliverable, skip review')
       return
     }
-    // ---- 审查风暴抑制（2026-08-31）----
+    // ---- 审查风暴抑制（2026-08-31；仅约束自动通道——声明通道不受此约束）----
     // P0-A 冷却期：窗口内成功审查已达上限 → 跳过（延迟不丢弃；主 agent 聚合修订后下次审查读最新状态）
     if (shouldCooldown(successTimes.get(session.id) ?? [], Date.now(), MAX_REVIEWS_PER_WINDOW, COOLDOWN_WINDOW_MS)) {
       const recent = (successTimes.get(session.id) ?? []).filter((t) => t >= Date.now() - COOLDOWN_WINDOW_MS).length
@@ -321,7 +333,7 @@ export function apply(ctx: Context): void {
   })
 }
 
-async function runReview(ctx: Context, session: any, turn?: number, startSeq?: number, endSeq?: number): Promise<void> {
+async function runReview(ctx: Context, session: any, turn?: number, startSeq?: number, endSeq?: number, declaredPaths: string[] = []): Promise<void> {
   diag('runReview start, cwd:', session.header?.cwd)
   const cwd = session.header?.cwd
   const root = findUnivEdgeRoot(cwd)
@@ -330,7 +342,8 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
     return
   }
 
-  const input = extractReviewInput(session, startSeq ?? 0, endSeq ?? Number.MAX_SAFE_INTEGER)
+  const channel = declaredPaths.length > 0 ? 'declared' : 'auto' // P2-A 扩展：触发通道（观察期对比用）
+  const input = extractReviewInput(session, startSeq ?? 0, endSeq ?? Number.MAX_SAFE_INTEGER, declaredPaths)
   if (!input.task && !input.finalReply) {
     diag('no content to review, skip')
     return
@@ -406,9 +419,10 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
 
   // 写审查报告（缺陷 3：按评估者会话分目录，杜绝后写覆盖先写）
   const task = extractTaskName(input.artifacts) // 从触发轮产物路径提取任务名（可空，仅进索引）
-  persistReport(root, session, childId, report, task, turn)
+  persistReport(root, session, childId, report, task, turn, channel)
   recordSuccess(session.id) // 报告落盘 = 成功，复位失败计数 + 记录成功时间（P0-A 冷却期用）
   // P0-B：记录被审产物内容 hash（供后续 hash 去重；迟到回收路径不记录，宁审勿漏）
+  // 注（selfcheck S1-1）：hash 记录源与 artifactPathsOfTurn 不同源，相对路径产物不入 map——宁审勿漏方向，观察期后随自动通道一并退役
   for (const p of input.artifacts) {
     const h = contentHash(p)
     if (h !== undefined) reviewedHashes.set(p, h)
@@ -416,12 +430,13 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
 }
 
 /** 写审查报告（缺陷 3：按评估者会话分目录）+ 追加审查索引（INDEX.md，管理入口）。
- * P2-A：报告头标注触发 turn（触发可见性；迟到回收路径无 turn 时记 —）。 */
-function persistReport(root: string, session: any, childId: string, report: string, task?: string, turn?: number): void {
+ * P2-A：报告头标注触发 turn 与触发通道（declared=@review 声明 / auto=自动嗅探；观察期对比用；
+ * 迟到回收路径无 turn/通道时记 —/auto）。 */
+function persistReport(root: string, session: any, childId: string, report: string, task?: string, turn?: number, channel = 'auto'): void {
   const dir = reviewOutDir(root, session.id, childId)
   mkdirSync(dir, { recursive: true })
   const file = join(dir, 'review.md')
-  writeFileSync(file, `# 独立审查报告（R7）\n\n- 主会话: ${session.id}\n- 评估者会话: ${childId}\n- 触发 turn: ${turn ?? '—'}\n- 生成时间: ${new Date().toISOString()}\n\n---\n\n${report}\n`, 'utf8')
+  writeFileSync(file, `# 独立审查报告（R7）\n\n- 主会话: ${session.id}\n- 评估者会话: ${childId}\n- 触发 turn: ${turn ?? '—'}\n- 触发通道: ${channel}\n- 生成时间: ${new Date().toISOString()}\n\n---\n\n${report}\n`, 'utf8')
   diag('report written:', file)
   appendReviewIndex(root, {
     mainId: session.id,

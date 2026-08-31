@@ -11,6 +11,7 @@
  *  - 缺陷 2（空报告落盘路径）/ 缺陷 3（分目录写盘路径）/ 缺陷 4 + S2-2（pickReport 报告提取）
  *  - 审查风暴抑制（2026-08-31 storm-diagnosis）：r7- 存档豁免（§7）、quiet 指令（P1-A）、
  *    冷却期（P0-A）、hash 去重（P0-B）
+ *  - 显式审查点（2026-08-31 framework-redesign 方向 1）：@review 声明提取（文本级）+ 事件级扫描
  */
 import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport, isReviewSelfOutput, extractTaskName, extractConclusion, reviewIndexPath } from '../reviewer-shared'
 
@@ -161,13 +162,39 @@ import { hasQuietDirective, allArtifactsUnchanged, shouldCooldown, contentHash }
   }
 }
 
+// ---------- 10. 显式审查点（2026-08-31 framework-redesign 方向 1：@review 声明通道） ----------
+import { extractReviewDeclarations, scanTurnDeclarations } from '../reviewer-shared'
+{
+  check('声明：@review run/step5/conclusion.md', extractReviewDeclarations('产物已完成，@review run/step5/conclusion.md'), ['run/step5/conclusion.md'], 'declare')
+  check('声明：多路径去重', extractReviewDeclarations('@review run/a.md 和 @review run/a.md 与 @review run/b.json'), ['run/a.md', 'run/b.json'], 'declare')
+  check('声明：尾部清单（"与"连接多路径）', extractReviewDeclarations('完成，@review run/t1/a.md 与 run/t1/b.md'), ['run/t1/a.md', 'run/t1/b.md'], 'declare')
+  check('声明：尾部清单（顿号连接）', extractReviewDeclarations('@review run/x/1.md、run/x/2.md、run/x/3.json'), ['run/x/1.md', 'run/x/2.md', 'run/x/3.json'], 'declare')
+  check('声明：任意 .md（非 run/）', extractReviewDeclarations('请审查 @review notes/summary.md'), ['notes/summary.md'], 'declare')
+  check('声明：审查自输出被过滤（@review 自己的报告无意义）', extractReviewDeclarations('@review run/review/9e496951/9546ca98/review.md'), [], 'declare')
+  check('声明：无 @review → 空数组', extractReviewDeclarations('已写入 run/step5/conclusion.md，请查阅'), [], 'declare')
+  check('声明：@review 无路径 → 空（约定：必须带路径）', extractReviewDeclarations('请 @review 一下'), [], 'declare')
+  check('声明：大小写不敏感（@Review）', extractReviewDeclarations('@Review run/step5/x.md'), ['run/step5/x.md'], 'declare')
+  check('声明：不存在的文件也提取（路径提取不查盘，留给评估者核实）', extractReviewDeclarations('@review run/ghost/x.md'), ['run/ghost/x.md'], 'declare')
+
+  // 事件级扫描（seq 窗口过滤 + user/assistant 事件）
+  const evs = [
+    { seq: 1, type: 'user/message', data: { message: { content: [{ type: 'text', text: '任务开始' }] } } },
+    { seq: 5, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '写入 run/t1/a.md' }] } } },
+    { seq: 6, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '完成，@review run/t1/a.md 与 run/t1/b.md' }] } } },
+    { seq: 9, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '@review run/t2/c.md（窗口外，不应计入）' }] } } },
+  ]
+  check('声明扫描：窗口 [5,6] 只取 turn 内声明', scanTurnDeclarations(evs, 5, 6), ['run/t1/a.md', 'run/t1/b.md'], 'declare-scan')
+  check('声明扫描：窗口 [0,9] 全量', scanTurnDeclarations(evs, 0, 9), ['run/t1/a.md', 'run/t1/b.md', 'run/t2/c.md'], 'declare-scan')
+  check('声明扫描：无事件 → 空', scanTurnDeclarations([], 0, 9), [], 'declare-scan')
+}
+
 // ---------- 输出 ----------
 const lines = [
   '# reviewer 逻辑单元测试结果（shared 模块）',
   '',
   `- 日期：${new Date().toISOString().slice(0, 10)}`,
   '- 命令：`tsx --tsconfig <dsh>/tsconfig.json tests/reviewer-deliverable.ts`',
-  '- 覆盖：触发判据（A/B 层）+ 缺陷 2/3/4 + S1-1/S1-4/S1-5 + S2-2 + INDEX 创建/追加/并发 + 共享模块单一事实来源（S1-2）',
+  '- 覆盖：触发判据（A/B 层）+ 缺陷 2/3/4 + S1-1/S1-4/S1-5 + S2-2 + INDEX 创建/追加/并发 + 共享模块单一事实来源（S1-2）+ 风暴抑制（quiet/冷却/hash/r7-）+ @review 声明通道',
   '',
   '| 用例 | 期望 | 实测 | 关联 |',
   '|---|---|---|---|',

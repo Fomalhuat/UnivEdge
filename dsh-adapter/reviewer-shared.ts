@@ -175,3 +175,47 @@ export function shouldCooldown(times: number[], now: number, maxPerWindow: numbe
   const cutoff = now - windowMs
   return times.filter((t) => t >= cutoff).length >= maxPerWindow
 }
+
+// ==================== 显式审查点（2026-08-31 framework-redesign 方向 1：双通道并存观察期）====================
+// 理念：审查触发权交还主 agent——交付时显式声明 `@review <路径>`（claimed → 审查请求 → verified）。
+// 观察期保留自动嗅探判据（hasDeliverable）双通道并存；声明通道触发即必审（不受冷却/hash 约束，
+// 显式声明 = 意志信号，与"响应审查的修订"无关），自动通道继续受冷却/hash 约束。
+// 切换期删除自动通道后：判据 = 声明 + 会话结束兜底。
+
+/** @review 声明（P1 声明通道，framework-redesign 方向 1）：@review 后跟产物路径清单（空格/中文连接词分隔）。
+ * 语义 = "审查这些产物"——尾部扫描（@review 之后 200 字符内）提取所有产物路径，过滤审查自输出，去重保序。
+ * 约定：@review 后必须跟至少一个路径（无路径声明不支持——写不出"审什么"就无意义）。
+ * 设计取舍：单路径逐一声明更严格但违背自然表达（"@review a 与 b"是主 agent 的常见写法）；
+ * 尾部扫描多路径代价极小且语义明确（@review 后的路径清单意图清晰），比自动嗅探的完成态动词可靠一个量级。 */
+export const REVIEW_DECLARE_RE = /@review\b/gi
+
+/** 从文本提取 @review 声明的产物路径（尾部扫描多路径；过滤审查自输出；无声明/无路径返回空数组；去重保序）。 */
+export function extractReviewDeclarations(txt: string): string[] {
+  const out: string[] = []
+  const re = new RegExp(REVIEW_DECLARE_RE.source, 'gi')
+  const pathRe = /[^\s"',，、]+\.(?:md|json|txt|csv|yaml|yml|log|dat)\b/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(txt)) !== null) {
+    const tail = txt.slice(m.index + m[0].length, m.index + m[0].length + 200)
+    const paths = tail.match(pathRe) ?? []
+    for (const p of paths) {
+      if (!isReviewSelfOutput(p)) out.push(p)
+    }
+  }
+  return [...new Set(out)]
+}
+
+/** 事件级扫描：turn 窗口内 user/assistant 文本中的 @review 声明路径（P1 声明通道）。
+ * 与 hasQuietDirective 同构（扫描同一类事件），独立函数便于单测。 */
+export function scanTurnDeclarations(events: any[], startSeq: number, endSeq: number): string[] {
+  const out: string[] = []
+  for (const ev of events) {
+    if (typeof ev.seq !== 'number' || ev.seq < startSeq || ev.seq > endSeq) continue
+    if (ev.type !== 'user/message' && ev.type !== 'assistant/message') continue
+    const msg = ev.data?.message ?? ev.data
+    const content = msg?.content ?? []
+    const txt = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('')
+    out.push(...extractReviewDeclarations(txt))
+  }
+  return [...new Set(out)]
+}
