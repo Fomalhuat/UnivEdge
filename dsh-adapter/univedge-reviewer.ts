@@ -244,6 +244,8 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
     diag('reviewer child turn/end received')
   } catch (e) {
     diag('wait failed:', String(e))
+    // 缺陷 6：超时中止后迟到 turn/end 的完整报告回收——先查当前会话事件，再挂迟到监听，杜绝静默丢失
+    void collectLateReport(ctx, root, session, childId, startSeq, endSeq)
     return
   }
 
@@ -252,23 +254,74 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
   const report = pickReport(child?.session?.events ?? [])
   diag('report length:', report.length)
 
-  const shortId = String(session.id).replace(/^session-/, '').slice(0, 8)
-  const shortChild = String(childId).replace(/^session-/, '').slice(0, 8)
-
   if (!report) {
     // 缺陷 2：空报告显式落盘（含 childId/时间/turn 窗口），而非静默 return——供诊断 token/速率限制
     diag('no report text, persisting empty-report record')
-    const emptyDir = emptyOutDir(root, session.id)
-    mkdirSync(emptyDir, { recursive: true })
-    writeFileSync(join(emptyDir, `${shortChild}.md`),
-      `# 空报告记录\n\n- 主会话: ${session.id}\n- 评估者会话: ${childId}\n- 时间: ${new Date().toISOString()}\n- turn 窗口: ${startSeq}-${endSeq}\n- 状态: 评估者结束但未产出文本（可能 token 额度/速率限制）\n`, 'utf8')
+    persistEmpty(root, session, childId, startSeq, endSeq)
     return
   }
 
   // 写审查报告（缺陷 3：按评估者会话分目录，杜绝后写覆盖先写）
+  persistReport(root, session, childId, report)
+}
+
+/** 写审查报告（缺陷 3：按评估者会话分目录）。 */
+function persistReport(root: string, session: any, childId: string, report: string): void {
   const dir = reviewOutDir(root, session.id, childId)
   mkdirSync(dir, { recursive: true })
   const file = join(dir, 'review.md')
   writeFileSync(file, `# 独立审查报告（R7）\n\n- 主会话: ${session.id}\n- 评估者会话: ${childId}\n- 生成时间: ${new Date().toISOString()}\n\n---\n\n${report}\n`, 'utf8')
   diag('report written:', file)
+}
+
+/** 空报告/中止记录落盘（缺陷 2 + 缺陷 6）。 */
+function persistEmpty(root: string, session: any, childId: string, startSeq?: number, endSeq?: number): void {
+  const shortChild = String(childId).replace(/^session-/, '').slice(0, 8)
+  const emptyDir = emptyOutDir(root, session.id)
+  mkdirSync(emptyDir, { recursive: true })
+  writeFileSync(join(emptyDir, `${shortChild}.md`),
+    `# 空报告记录\n\n- 主会话: ${session.id}\n- 评估者会话: ${childId}\n- 时间: ${new Date().toISOString()}\n- turn 窗口: ${startSeq}-${endSeq}\n- 状态: 评估者结束但未产出文本（可能 token 额度/速率限制或超时中止）\n`, 'utf8')
+}
+
+/** 缺陷 6：超时中止后回收迟到报告——先查当前会话事件（竞态窗口），再挂迟到监听（限时 5 分钟），
+ * 仍无报告则落盘"中止"记录。杜绝"wait failed 后直接 return"导致的迟到完整报告静默丢失。 */
+async function collectLateReport(ctx: Context, root: string, session: any, childId: string | undefined, startSeq?: number, endSeq?: number): Promise<void> {
+  if (!childId) return
+  diag('collectLateReport start, child:', childId)
+  const tryPick = (): string => {
+    const child = ctx.agents.get(childId as any) as any
+    return pickReport(child?.session?.events ?? [])
+  }
+  // 1) 竞态窗口：wait failed 瞬间可能已产出（如 turn/end 刚完成但事件未及时送达）
+  const immediate = tryPick()
+  if (immediate) {
+    diag('late report already available, persisting')
+    persistReport(root, session, childId, immediate)
+    return
+  }
+  // 2) 挂迟到监听（限时 5 分钟）：子代理稍后完成 turn/end 则回收
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => { off(); reject(new Error('late report timeout')) }, 300_000)
+      const off = ctx.on('session/event', (s: any, ev: any) => {
+        if (s?.id === childId && ev?.type === 'turn/end') {
+          clearTimeout(timer)
+          off()
+          resolve()
+        }
+      })
+    })
+    const late = tryPick()
+    if (late) {
+      diag('late report recovered')
+      persistReport(root, session, childId, late)
+    } else {
+      diag('late turn/end but no report text, persisting empty')
+      persistEmpty(root, session, childId, startSeq, endSeq)
+    }
+  } catch {
+    // 3) 迟到超时仍无报告 → 落盘"中止"记录（可诊断）
+    diag('late report timeout, persisting abort record')
+    persistEmpty(root, session, childId, startSeq, endSeq)
+  }
 }
