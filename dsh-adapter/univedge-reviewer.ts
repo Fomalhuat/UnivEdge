@@ -1,6 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
+import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport } from './reviewer-shared'
 
 /** 诊断日志（临时，定位后移除）。 */
 function diag(...args: any[]): void {
@@ -69,13 +70,6 @@ function extractReviewInput(session: any, startSeq = 0, endSeq = Number.MAX_SAFE
  */
 function hasDeliverable(session: any, startSeq: number, endSeq: number): boolean {
   const evts = session?.events ?? []
-  const DELIVER_WORDS = /(?:已写入|已保存到|已保存至|产物在|写入完成|已落盘)\s*(?:run\/)?[^\s"']+\.(?:md|json|txt|csv|yaml|yml)\b/i
-  // 交付物路径判定：run/ 下产物或任意 .md，但排除审计元数据（审查自输出目录 REVIEW_DIR——handoff-reviewer-fix 缺陷 1）
-  // 注意：匹配 REVIEW_DIR + '/'（目录边界），避免误伤同名前缀目录（如 run/review-test2/）
-  const isArtifact = (p: string): boolean => (
-    (/\brun\/[^\s"']*\.(md|json|txt|log|csv|yaml|yml|dat)\b/i.test(p) || /\.md\b/i.test(p))
-    && !p.includes(`${REVIEW_DIR}/`)
-  )
   for (const ev of evts) {
     if (typeof ev.seq !== 'number' || ev.seq < startSeq || ev.seq > endSeq) continue
     if (ev.type === 'tool/call') {
@@ -89,20 +83,20 @@ function hasDeliverable(session: any, startSeq: number, endSeq: number): boolean
           parsed?.file_path, parsed?.path, parsed?.file, parsed?.filePath, parsed?.new_path, parsed?.newPath,
           ...(Array.isArray(parsed?.items) ? parsed.items : []),
         ].filter((p): p is string => typeof p === 'string')
-        hit = candidates.some(isArtifact)
+        hit = candidates.some(isArtifactPath)
       } catch { /* fall through */ }
       if (!hit) {
         const s = JSON.stringify(ev.data ?? {})
         const paths = s.match(/[^\s"']{1,200}\.(?:md|json|txt|log|csv|yaml|yml|dat)\b/gi) ?? []
-        hit = paths.some((p) => isArtifact(p.replace(/^"|"$/g, '')))
+        hit = paths.some((p) => isArtifactPath(p.replace(/^"|"$/g, '')))
       }
       if (hit) return true
     } else if (ev.type === 'assistant/message') {
       const msg = ev.data?.message
       const content = msg?.content ?? []
       const txt = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('')
-      // 文本层同样排除审计路径表述（缺陷 1 修复：文档维护轮说"已写入 run/review/…"不触发）
-      if (!txt.includes(`${REVIEW_DIR}/`) && DELIVER_WORDS.test(txt)) return true
+      // 文本层按"路径片段粒度"判定（S1-4）：存在完成态动词+非自输出路径即交付
+      if (textHasDeliverable(txt)) return true
     }
   }
   return false
@@ -162,7 +156,8 @@ export function apply(ctx: Context): void {
 
   // 记录主 agent（第一个 session-start；子 agent 的 origin 是 subagent，不会覆盖）
   ctx.on('agent/session-start', ({ agent }: { agent: any }) => {
-    if (!mainId) {
+    // S2-5：mainId 只取非 subagent 会话（子代理先启动不会定错主会话）
+    if (!mainId && agent.session?.header?.origin !== 'subagent') {
       mainId = agent.id
       diag('main session-start:', agent.id, 'cwd:', agent.session?.header?.cwd)
     }
@@ -252,21 +247,9 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
     return
   }
 
-  // 读评估者最终回复（缺陷 4：取最长实质消息，避免"报告已提交完毕"摘要桩顶掉完整报告）
-  let report = ''
-  let longest = ''
+  // 读评估者回复（缺陷 4 + S2-2：pickReport 取"含报告标志的实质消息中最长"，防摘要桩也防长分析顶掉）
   const child = ctx.agents.get(childId as any) as any
-  const evts = child?.session?.events ?? []
-  for (const ev of evts) {
-    if (ev.type === 'assistant/message') {
-      const msg = ev.data?.message
-      const content = msg?.content ?? []
-      const txt = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('')
-      const trimmed = txt.trim()
-      if (trimmed.length > longest.length) longest = trimmed
-    }
-  }
-  report = longest
+  const report = pickReport(child?.session?.events ?? [])
   diag('report length:', report.length)
 
   const shortId = String(session.id).replace(/^session-/, '').slice(0, 8)
@@ -275,7 +258,7 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
   if (!report) {
     // 缺陷 2：空报告显式落盘（含 childId/时间/turn 窗口），而非静默 return——供诊断 token/速率限制
     diag('no report text, persisting empty-report record')
-    const emptyDir = join(root, REVIEW_DIR, shortId, 'empty')
+    const emptyDir = emptyOutDir(root, session.id)
     mkdirSync(emptyDir, { recursive: true })
     writeFileSync(join(emptyDir, `${shortChild}.md`),
       `# 空报告记录\n\n- 主会话: ${session.id}\n- 评估者会话: ${childId}\n- 时间: ${new Date().toISOString()}\n- turn 窗口: ${startSeq}-${endSeq}\n- 状态: 评估者结束但未产出文本（可能 token 额度/速率限制）\n`, 'utf8')
@@ -283,7 +266,7 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
   }
 
   // 写审查报告（缺陷 3：按评估者会话分目录，杜绝后写覆盖先写）
-  const dir = join(root, REVIEW_DIR, shortId, shortChild)
+  const dir = reviewOutDir(root, session.id, childId)
   mkdirSync(dir, { recursive: true })
   const file = join(dir, 'review.md')
   writeFileSync(file, `# 独立审查报告（R7）\n\n- 主会话: ${session.id}\n- 评估者会话: ${childId}\n- 生成时间: ${new Date().toISOString()}\n\n---\n\n${report}\n`, 'utf8')

@@ -10,11 +10,11 @@
 |---|---|
 | `univedge-l1-inject.ts` | dsh 插件：L1 双时机注入——`session-start` 全量（METHODOLOGY §0+§1 + 基层）+ `pre-step` 缺失时自动补精简版（长会话/compaction 保障） |
 | `univedge-hpc-gate.ts` | dsh 插件：注册 `submit_hpc_job` 工具——提交作业前强制 CHECK 字段校验（schema 层 `required` + execute 层非空校验双层门控） |
-| `univedge-reviewer.ts` | dsh 插件：任务完成后自动 spawn **独立评估者子 agent**（R7，怀疑派）审查产物，报告写入 `run/review/<主会话>/review.md`。**触发判据**：仅当 turn 内有"实质交付物"（写了 run/ 下产物文件 OR 文本含"完成态动词+文件名"）才审查——纯讨论/规划句轮不触发；**问题分级**（S 系列严重度，区别于权限门 L 系列与解耦等级）：S0 实质问题（标【需用户确认】）/ S1 有文档依据（自行判定+引用依据）/ S2 建议项（只进报告）。R7 自审（2026-08-31）修复：run/ 非 .md 产物漏审（`$` 锚定死代码）、未来式规划句误触发、todo_write 误触发、turn 缺失回退 |
+| `univedge-reviewer.ts` + `reviewer-shared.ts` | dsh 插件：任务完成后自动 spawn **独立评估者子 agent**（R7，怀疑派）审查产物，报告写入 `run/review/<主会话8>/<评估者8>/review.md`（分目录，杜绝覆盖）。**触发判据**：仅当 turn 内有"实质交付物"（写了产物文件 OR 文本含"完成态动词+路径"）才审查——讨论/规划句轮不触发；**审查自输出**（本审查器写的报告/空记录/selfcheck 产物）永不触发（防自激）；handoff 等审计文档在审查面内（可被审）。**问题分级**（S 系列严重度）：S0 实质（标【需用户确认】）/ S1 有依据（自行判定）/ S2 建议。共享逻辑在 `reviewer-shared.ts`（单一事实来源，源码与测试共用）。R7 两轮自审（2026-08-31）修复：`$` 锚定死代码、规划句误触发、todo_write 误触发、触发风暴（审计自输出排除）、空报告落盘、分目录写盘、摘要桩、报告标志提取 |
 | `analyze_session.py` | 协议遵守率统计脚本：解析 session.jsonl.zstd，输出 7 项指标（L0/L1/L2/工具代算/锚点） |
 | `cordis.patch.yml` | 注册以上插件的 patch（用 `--patch` 加载；"新增 entry"须用 `insert:` 语法） |
 | `test-runner.ts` + `test.patch.yml` | 测试专用：headless 主任务后不退出，轮询审查报告生成再退出（验证 reviewer 用） |
-| `tests/reviewer-deliverable.mjs` + `test-results/` | reviewer 触发判据单元测试（hasDeliverable 等价复现，8 用例）+ 落盘结果（如 `test-results/2026-08-31-reviewer-deliverable.md`）——运行 `node tests/reviewer-deliverable.mjs`；"8/8 通过"声明的可核产物 |
+| `tests/reviewer-deliverable.ts` + `test-results/` | reviewer 逻辑单元测试（import reviewer-shared，22 用例：触发判据 A/B + 缺陷 2/3/4 + S1-1/S1-4/S1-5 + S2-2）+ 落盘结果（如 `test-results/2026-08-31-reviewer-deliverable.md`）——运行 `tsx --tsconfig <dsh>/tsconfig.json tests/reviewer-deliverable.ts`；"通过"声明的可核产物 |
 
 ## 机制（分层）
 
