@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport, extractTaskName, extractConclusion, appendReviewIndex, REVIEW_DIR } from './reviewer-shared.ts'
+import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport, extractTaskName, extractConclusion, appendReviewIndex, REVIEW_DIR, hasQuietDirective, allArtifactsUnchanged, shouldCooldown, contentHash } from './reviewer-shared.ts'
 
 /** 诊断日志（临时，定位后移除）。 */
 function diag(...args: any[]): void {
@@ -24,6 +24,17 @@ const CIRCUIT_OPEN_MS = 15 * 60 * 1000
  * 阈值须宽松——正常审查 ~0.1 元/次不贵，卡正常使用是过度设计。 */
 const HOURLY_REVIEW_LIMIT = Number(process.env.UNIVEDGE_REVIEW_LIMIT_PER_HOUR ?? 20)
 
+// ---- 审查风暴抑制（2026-08-31 review-storm-diagnosis 修复：拦"成功但低收益的反复自证"）----
+// 原有 4 道防护拦的是"失败雪崩"与"无交付物轮"，未拦"同一产物连续小修触发重审"——本轮风暴根因。
+// P0-A 冷却期：同主会话滑动窗口内成功审查 ≥N 次 → 暂停自动审查（延迟不丢弃；下次审查读最新会话状态）
+const COOLDOWN_MIN = Number(process.env.UNIVEDGE_REVIEW_COOLDOWN_MIN ?? 15)
+const COOLDOWN_WINDOW_MS = COOLDOWN_MIN * 60 * 1000
+const MAX_REVIEWS_PER_WINDOW = Number(process.env.UNIVEDGE_REVIEW_MAX_PER_WINDOW ?? 2)
+// P0-B hash 去重：path -> 最近一次被审时的内容 hash（内容未变则不重审）
+const reviewedHashes = new Map<string, string>()
+// P0-A 冷却期状态：sessionId -> 成功审查时间戳（升序，只留窗口内）
+const successTimes = new Map<string, number[]>()
+
 let consecutiveFailures = 0
 let circuitOpenUntil = 0
 const hourlyCounts = new Map<string, { hour: string; count: number }>()
@@ -36,8 +47,16 @@ function recordFailure(): void {
   }
 }
 
-function recordSuccess(): void {
+function recordSuccess(sessionId?: string): void {
   consecutiveFailures = 0
+  // P0-A：记录成功审查时间（只留窗口内，防 Map 无限增长）；供冷却期判定
+  if (sessionId) {
+    const now = Date.now()
+    const arr = successTimes.get(sessionId) ?? []
+    arr.push(now)
+    const cutoff = now - COOLDOWN_WINDOW_MS
+    successTimes.set(sessionId, arr.filter((t) => t >= cutoff))
+  }
 }
 
 function circuitOpen(): boolean {
@@ -155,6 +174,39 @@ function hasDeliverable(session: any, startSeq: number, endSeq: number): boolean
   return false
 }
 
+/** P1-A：本 turn 内 user/assistant 文本是否含 quiet 指令（--no-review / review:off）——跳过审查。 */
+function turnHasQuietDirective(session: any, startSeq: number, endSeq: number): boolean {
+  for (const ev of session?.events ?? []) {
+    if (typeof ev.seq !== 'number' || ev.seq < startSeq || ev.seq > endSeq) continue
+    if (ev.type !== 'user/message' && ev.type !== 'assistant/message') continue
+    const msg = ev.data?.message ?? ev.data
+    const content = msg?.content ?? []
+    const txt = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('')
+    if (hasQuietDirective(txt)) return true
+  }
+  return false
+}
+
+/** P0-B/P2-A：本 turn 的产物路径（结构化提取 write/edit/str_replace_editor 的路径字段，与 hasDeliverable 信号 A 一致）。
+ * 仅用于 hash 去重与触发可见性；提取不到则返回空数组（allArtifactsUnchanged 对空列表返回 false，不误拦）。 */
+function artifactPathsOfTurn(session: any, startSeq: number, endSeq: number): string[] {
+  const paths = new Set<string>()
+  for (const ev of session?.events ?? []) {
+    if (typeof ev.seq !== 'number' || ev.seq < startSeq || ev.seq > endSeq) continue
+    if (ev.type !== 'tool/call') continue
+    const name = ev.data?.name ?? ev.data?.tool ?? ''
+    if (!['write', 'edit', 'str_replace_editor'].includes(name)) continue
+    let parsed: any = ev.data
+    try { parsed = typeof ev.data === 'object' ? ev.data : JSON.parse(String(ev.data ?? '{}')) } catch { /* keep as-is */ }
+    const candidates: string[] = [
+      parsed?.file_path, parsed?.path, parsed?.file, parsed?.filePath, parsed?.new_path, parsed?.newPath,
+      ...(Array.isArray(parsed?.items) ? parsed.items : []),
+    ].filter((p): p is string => typeof p === 'string').filter(isArtifactPath)
+    for (const c of candidates) paths.add(c)
+  }
+  return [...paths]
+}
+
 /** 本 turn 的起点 seq（最近的 turn/start；turn 字段缺失时回退到最后一个 user/message——L2-4）。 */
 function turnStartSeq(session: any, turn: number): number {
   let seq = 0
@@ -241,11 +293,29 @@ export function apply(ctx: Context): void {
     const turn = event.data?.turn
     const endSeq = event.seq
     const startSeq = turnStartSeq(session, turn)
+    // P1-A：quiet 指令（用户/主 agent 显式声明"本轮不审查"）——先于判据，最便宜
+    if (turnHasQuietDirective(session, startSeq, endSeq)) {
+      diag('turn', turn, 'quiet directive (--no-review / review:off), skip review')
+      return
+    }
     if (!hasDeliverable(session, startSeq, endSeq)) {
       diag('turn', turn, 'no deliverable, skip review')
       return
     }
-    diag('turn', turn, 'has deliverable, triggering runReview')
+    // ---- 审查风暴抑制（2026-08-31）----
+    // P0-A 冷却期：窗口内成功审查已达上限 → 跳过（延迟不丢弃；主 agent 聚合修订后下次审查读最新状态）
+    if (shouldCooldown(successTimes.get(session.id) ?? [], Date.now(), MAX_REVIEWS_PER_WINDOW, COOLDOWN_WINDOW_MS)) {
+      const recent = (successTimes.get(session.id) ?? []).filter((t) => t >= Date.now() - COOLDOWN_WINDOW_MS).length
+      diag('turn', turn, `cooldown active (${recent}/${MAX_REVIEWS_PER_WINDOW} reviews in ${COOLDOWN_MIN}min), skip review`)
+      return
+    }
+    // P0-B hash 去重：本 turn 产物内容与上次被审时全同 → 跳过（拦"内容没变还触发"）
+    const paths = artifactPathsOfTurn(session, startSeq, endSeq)
+    if (allArtifactsUnchanged(paths, reviewedHashes)) {
+      diag('turn', turn, 'artifacts unchanged since last review, skip:', paths.join(', '))
+      return
+    }
+    diag('turn', turn, 'has deliverable, triggering runReview; artifacts:', paths.length ? paths.join(', ') : '(signal-B only)')
     countReview(session.id)
     void runReview(ctx, session, turn, startSeq, endSeq)
   })
@@ -336,16 +406,22 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
 
   // 写审查报告（缺陷 3：按评估者会话分目录，杜绝后写覆盖先写）
   const task = extractTaskName(input.artifacts) // 从触发轮产物路径提取任务名（可空，仅进索引）
-  persistReport(root, session, childId, report, task)
-  recordSuccess() // 报告落盘 = 成功，复位失败计数
+  persistReport(root, session, childId, report, task, turn)
+  recordSuccess(session.id) // 报告落盘 = 成功，复位失败计数 + 记录成功时间（P0-A 冷却期用）
+  // P0-B：记录被审产物内容 hash（供后续 hash 去重；迟到回收路径不记录，宁审勿漏）
+  for (const p of input.artifacts) {
+    const h = contentHash(p)
+    if (h !== undefined) reviewedHashes.set(p, h)
+  }
 }
 
-/** 写审查报告（缺陷 3：按评估者会话分目录）+ 追加审查索引（INDEX.md，管理入口）。 */
-function persistReport(root: string, session: any, childId: string, report: string, task?: string): void {
+/** 写审查报告（缺陷 3：按评估者会话分目录）+ 追加审查索引（INDEX.md，管理入口）。
+ * P2-A：报告头标注触发 turn（触发可见性；迟到回收路径无 turn 时记 —）。 */
+function persistReport(root: string, session: any, childId: string, report: string, task?: string, turn?: number): void {
   const dir = reviewOutDir(root, session.id, childId)
   mkdirSync(dir, { recursive: true })
   const file = join(dir, 'review.md')
-  writeFileSync(file, `# 独立审查报告（R7）\n\n- 主会话: ${session.id}\n- 评估者会话: ${childId}\n- 生成时间: ${new Date().toISOString()}\n\n---\n\n${report}\n`, 'utf8')
+  writeFileSync(file, `# 独立审查报告（R7）\n\n- 主会话: ${session.id}\n- 评估者会话: ${childId}\n- 触发 turn: ${turn ?? '—'}\n- 生成时间: ${new Date().toISOString()}\n\n---\n\n${report}\n`, 'utf8')
   diag('report written:', file)
   appendReviewIndex(root, {
     mainId: session.id,
@@ -404,7 +480,7 @@ async function collectLateReport(ctx: Context, root: string, session: any, child
     if (late) {
       diag('late report recovered')
       persistReport(root, session, childId, late)
-      recordSuccess() // 迟到回收成功 = 复位失败计数
+      recordSuccess(session.id) // 迟到回收成功 = 复位失败计数 + 记录成功时间（P0-A）
     } else {
       diag('late turn/end but no report text, persisting empty')
       recordFailure()

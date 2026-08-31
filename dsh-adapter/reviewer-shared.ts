@@ -1,7 +1,8 @@
 /**
  * univedge-reviewer 共享逻辑（单一事实来源——源码与测试共同 import，防常量/逻辑漂移，S1-2 闭合）
  */
-import { existsSync, writeFileSync, appendFileSync, mkdirSync } from 'node:fs'
+import { existsSync, writeFileSync, appendFileSync, mkdirSync, readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { dirname } from 'node:path'
 
 /** 审查自输出语义（用户裁定 2026-08-31）：
@@ -10,7 +11,8 @@ import { dirname } from 'node:path'
  * - 空报告记录：  run/review/<主8>/empty/<评估者8>.md
  * - 自检产物：    run/review/selfcheck/（2026-08-31 起迁入；旧 run/review-selfcheck* 兼容待清理）
  * - 审查索引：    run/review/INDEX.md（审查管理入口，每次落盘追加记录）
- * - **不排除**（重新进入审查面，S1-1 收窄）：handoff-*.md、r7- 存档目录、其他 run/review/ 下审计文档
+ * - **不排除**（重新进入审查面，S1-1 收窄）：handoff-*.md、其他 run/review/ 下审计文档
+ * - **2026-08-31 storm-diagnosis §7 修订**：r7- 前缀目录（早期审查存档命名）加入豁免——审查存档不再入审查面
  */
 export const REVIEW_DIR = 'run/review'
 
@@ -29,6 +31,8 @@ export function isReviewSelfOutput(p: string): boolean {
   if (p.includes(`${REVIEW_DIR}/selfcheck`)) return true
   // 审查索引文件（S2-8：review/ 下产物语义闭合——INDEX.md 是插件写的管理入口）
   if (p.includes(`${REVIEW_DIR}/INDEX.md`)) return true
+  // 审查存档目录（storm-diagnosis §7：r7- 前缀是早期审查存档命名，不入审查面，防存档被重复审）
+  if (p.includes(`${REVIEW_DIR}/r7-`)) return true
   return false
 }
 
@@ -130,4 +134,44 @@ export function appendReviewIndex(root: string, rec: { mainId: string; childId: 
     try { console.error(`[univedge-reviewer] appendReviewIndex failed: ${String(e)}`) } catch { /* ignore */ }
     return false
   }
+}
+
+// ==================== 审查风暴抑制（2026-08-31 review-storm-diagnosis 修复）====================
+// 触发判据原本只问"本 turn 有无实质交付物"，不问"该产物是否已被审查过/改动是否只是响应审查意见"，
+// 导致 审查→修订→审查 固定反馈环（2 小时 6 次审查）。此处三件套补上这层感知：
+// - P0-A 冷却期：同主会话滑动窗口内成功审查 ≥N 次 → 暂停自动审查（延迟而非丢弃，下次审查读最新会话状态）
+// - P0-B hash 去重：本 turn 产物内容与上次被审时全同 → 跳过（拦"内容没变还触发"）
+// - P1-A quiet 指令：turn 文本含 --no-review / review:off → 跳过（用户/主 agent 细粒度控制，替代全关硬开关）
+
+/** quiet 指令判定（P1-A）：turn 内 user/assistant 文本含 --no-review 或 review:off 即跳过审查。 */
+export const QUIET_RE = /(?:--no-review|review\s*:\s*off)/i
+export function hasQuietDirective(txt: string): boolean {
+  return QUIET_RE.test(txt)
+}
+
+/** 产物内容 SHA-256 hex（P0-B）。读失败返回 undefined——不参与去重判定（宁审勿漏）。 */
+export function contentHash(p: string): string | undefined {
+  try {
+    return createHash('sha256').update(readFileSync(p)).digest('hex')
+  } catch {
+    return undefined
+  }
+}
+
+/** 是否全部产物内容与上次审查时一致（P0-B）。空路径列表或任一产物读取失败/有变化 → false（不跳过）。 */
+export function allArtifactsUnchanged(paths: string[], reviewed: Map<string, string>): boolean {
+  if (!paths.length) return false
+  for (const p of paths) {
+    const h = contentHash(p)
+    if (h === undefined || reviewed.get(p) !== h) return false
+  }
+  return true
+}
+
+/** 冷却期判定（P0-A）：滑动窗口 windowMs 内成功审查次数 ≥ maxPerWindow → true（应跳过）。
+ * times 为升序成功审查时间戳（最近在末尾），调用方负责维护与裁剪。 */
+export function shouldCooldown(times: number[], now: number, maxPerWindow: number, windowMs: number): boolean {
+  if (times.length < maxPerWindow) return false
+  const cutoff = now - windowMs
+  return times.filter((t) => t >= cutoff).length >= maxPerWindow
 }

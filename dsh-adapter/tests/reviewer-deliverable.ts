@@ -9,6 +9,8 @@
  *    run/review-test2 前缀不误伤、审计自输出排除、handoff 重新进入审查面（S1-1）、
  *    自检产物排除（S1-5）、文本层按路径片段粒度不连坐（S1-4）
  *  - 缺陷 2（空报告落盘路径）/ 缺陷 3（分目录写盘路径）/ 缺陷 4 + S2-2（pickReport 报告提取）
+ *  - 审查风暴抑制（2026-08-31 storm-diagnosis）：r7- 存档豁免（§7）、quiet 指令（P1-A）、
+ *    冷却期（P0-A）、hash 去重（P0-B）
  */
 import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport, isReviewSelfOutput, extractTaskName, extractConclusion, reviewIndexPath } from '../reviewer-shared'
 
@@ -78,7 +80,7 @@ check('纯中间思考（无报告标志）→ 空', pickReport([{ type: 'assist
 
 // ---------- 6. isReviewSelfOutput 精确性 ----------
 check('非审查路径不排除', isReviewSelfOutput('run/step5/data.csv'), false, '精确性')
-check('r7- 存档不排除（可被审）', isReviewSelfOutput('run/review/r7-348151ae/review.md'), false, 'S1-1')
+check('r7- 存档豁免（storm-§7：审查存档不入审查面）', isReviewSelfOutput('run/review/r7-348151ae/review.md'), true, 'storm-§7')
 check('新 selfcheck 路径：run/review/selfcheck/input.md 是自输出', isReviewSelfOutput('run/review/selfcheck/input.md'), true, '结构')
 check('run/ 顶层任务目录（非 review 前缀）不是自输出', isArtifactPath('run/step4a/conclusion.md'), true, '结构')
 
@@ -94,7 +96,7 @@ check('索引路径', reviewIndexPath('/home/u/UnivEdge'), '/home/u/UnivEdge/run
 
 // ---------- 8. appendReviewIndex 行为（S2-4：创建/追加/表头/并发首写） ----------
 import { appendReviewIndex } from '../reviewer-shared'
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 {
@@ -116,6 +118,44 @@ import { join } from 'node:path'
     appendReviewIndex(tmp, rec2) // 第二个走 EEXIST → append
     const content2 = readFileSync(join(tmp, 'run', 'review', 'INDEX.md'), 'utf8')
     check('并发首写场景两条记录不丢（wx 排他 + EEXIST 回退）', content2.split('\n').filter((l) => l.startsWith('| 20')).length, 2, 'S1-1')
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+}
+
+// ---------- 9. 审查风暴抑制（2026-08-31 review-storm-diagnosis：冷却期 / hash 去重 / quiet 指令） ----------
+import { hasQuietDirective, allArtifactsUnchanged, shouldCooldown, contentHash } from '../reviewer-shared'
+{
+  // P1-A quiet 指令
+  check('quiet：--no-review', hasQuietDirective('本轮仅响应 S2，--no-review'), true, 'storm-P1A')
+  check('quiet：review:off', hasQuietDirective('批量归档，review:off'), true, 'storm-P1A')
+  check('quiet：大小写不敏感（Review: OFF）', hasQuietDirective('Review: OFF'), true, 'storm-P1A')
+  check('quiet：正常回复不含', hasQuietDirective('已修订产物并落盘 run/step5/x.md'), false, 'storm-P1A')
+
+  // P0-A 冷却期（窗口 15min=900000ms，上限 2 次）
+  const now = 1_000_000_000_000
+  const W = 900_000
+  check('冷却：0 次成功 → 不冷却', shouldCooldown([], now, 2, W), false, 'storm-P0A')
+  check('冷却：1 次在窗口内 → 不冷却', shouldCooldown([now - 60_000], now, 2, W), false, 'storm-P0A')
+  check('冷却：2 次在窗口内 → 冷却', shouldCooldown([now - 60_000, now - 30_000], now, 2, W), true, 'storm-P0A')
+  check('冷却：1 次窗口内 + 1 次窗口外 → 不冷却', shouldCooldown([now - 2_000_000, now - 30_000], now, 2, W), false, 'storm-P0A')
+
+  // P0-B hash 去重（临时文件实测）
+  const tmp = mkdtempSync(join(tmpdir(), 'reviewer-hash-'))
+  try {
+    const f1 = join(tmp, 'a.md')
+    const f2 = join(tmp, 'b.md')
+    writeFileSync(f1, 'content-v1')
+    writeFileSync(f2, 'content-v2')
+    const reviewed = new Map<string, string>()
+    reviewed.set(f1, contentHash(f1)!)
+    check('hash：内容未变 → 全部一致（跳过）', allArtifactsUnchanged([f1], reviewed), true, 'storm-P0B')
+    check('hash：新增文件未记录 → 变化', allArtifactsUnchanged([f1, f2], reviewed), false, 'storm-P0B')
+    writeFileSync(f1, 'content-v1-edited')
+    check('hash：修改后 → 变化（触发）', allArtifactsUnchanged([f1], reviewed), false, 'storm-P0B')
+    check('hash：空路径列表 → 不跳过', allArtifactsUnchanged([], reviewed), false, 'storm-P0B')
+    check('hash：不存在的文件 → 不跳过（宁审勿漏）', allArtifactsUnchanged([join(tmp, 'ghost.md')], reviewed), false, 'storm-P0B')
+    check('hash：contentHash 读存在文件返回 64 hex', String(contentHash(f1)).length, 64, 'storm-P0B')
   } finally {
     rmSync(tmp, { recursive: true, force: true })
   }
