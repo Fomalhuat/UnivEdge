@@ -65,6 +65,11 @@ function extractReviewInput(session: any, startSeq = 0, endSeq = Number.MAX_SAFE
 function hasDeliverable(session: any, startSeq: number, endSeq: number): boolean {
   const evts = session?.events ?? []
   const DELIVER_WORDS = /(?:已写入|已保存到|已保存至|产物在|写入完成|已落盘)\s*(?:run\/)?[^\s"']+\.(?:md|json|txt|csv|yaml|yml)\b/i
+  // 交付物路径判定：run/ 下产物或任意 .md，但排除审计元数据（run/review/ 下自身产物——handoff-reviewer-fix 缺陷 1）
+  const isArtifact = (p: string): boolean => (
+    (/\brun\/[^\s"']*\.(md|json|txt|log|csv|yaml|yml|dat)\b/i.test(p) || /\.md\b/i.test(p))
+    && !/\brun\/review\//i.test(p)
+  )
   for (const ev of evts) {
     if (typeof ev.seq !== 'number' || ev.seq < startSeq || ev.seq > endSeq) continue
     if (ev.type === 'tool/call') {
@@ -78,20 +83,20 @@ function hasDeliverable(session: any, startSeq: number, endSeq: number): boolean
           parsed?.file_path, parsed?.path, parsed?.file, parsed?.filePath, parsed?.new_path, parsed?.newPath,
           ...(Array.isArray(parsed?.items) ? parsed.items : []),
         ].filter((p): p is string => typeof p === 'string')
-        hit = candidates.some((p) => (
-          /\brun\/[^\s"']*\.(md|json|txt|log|csv|yaml|yml|dat)\b/i.test(p) || /\.md\b/i.test(p)
-        ))
+        hit = candidates.some(isArtifact)
       } catch { /* fall through */ }
       if (!hit) {
         const s = JSON.stringify(ev.data ?? {})
-        hit = /\brun\/[^\s"']*\.(md|json|txt|log|csv|yaml|yml|dat)\b/i.test(s) || /\.md"/i.test(s)
+        const paths = s.match(/[^\s"']{1,200}\.(?:md|json|txt|log|csv|yaml|yml|dat)\b/gi) ?? []
+        hit = paths.some((p) => isArtifact(p.replace(/^"|"$/g, '')))
       }
       if (hit) return true
     } else if (ev.type === 'assistant/message') {
       const msg = ev.data?.message
       const content = msg?.content ?? []
       const txt = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('')
-      if (DELIVER_WORDS.test(txt)) return true
+      // 文本层同样排除审计路径表述（缺陷 1 修复：文档维护轮说"已写入 run/review/…"不触发）
+      if (!/\brun\/review\//i.test(txt) && DELIVER_WORDS.test(txt)) return true
     }
   }
   return false
@@ -241,8 +246,9 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
     return
   }
 
-  // 读评估者最终回复
+  // 读评估者最终回复（缺陷 4：取最长实质消息，避免"报告已提交完毕"摘要桩顶掉完整报告）
   let report = ''
+  let longest = ''
   const child = ctx.agents.get(childId as any) as any
   const evts = child?.session?.events ?? []
   for (const ev of evts) {
@@ -250,19 +256,28 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
       const msg = ev.data?.message
       const content = msg?.content ?? []
       const txt = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('')
-      if (txt.trim()) report = txt.trim()
+      const trimmed = txt.trim()
+      if (trimmed.length > longest.length) longest = trimmed
     }
   }
+  report = longest
   diag('report length:', report.length)
 
+  const shortId = String(session.id).replace(/^session-/, '').slice(0, 8)
+  const shortChild = String(childId).replace(/^session-/, '').slice(0, 8)
+
   if (!report) {
-    diag('no report text')
+    // 缺陷 2：空报告显式落盘（含 childId/时间/turn 窗口），而非静默 return——供诊断 token/速率限制
+    diag('no report text, persisting empty-report record')
+    const emptyDir = join(root, 'run', 'review', shortId, 'empty')
+    mkdirSync(emptyDir, { recursive: true })
+    writeFileSync(join(emptyDir, `${shortChild}.md`),
+      `# 空报告记录\n\n- 主会话: ${session.id}\n- 评估者会话: ${childId}\n- 时间: ${new Date().toISOString()}\n- turn 窗口: ${startSeq}-${endSeq}\n- 状态: 评估者结束但未产出文本（可能 token 额度/速率限制）\n`, 'utf8')
     return
   }
 
-  // 写审查报告到 run/review/<mainId-prefix>/review.md
-  const shortId = String(session.id).replace(/^session-/, '').slice(0, 8)
-  const dir = join(root, 'run', 'review', shortId)
+  // 写审查报告（缺陷 3：按评估者会话分目录，杜绝后写覆盖先写）
+  const dir = join(root, 'run', 'review', shortId, shortChild)
   mkdirSync(dir, { recursive: true })
   const file = join(dir, 'review.md')
   writeFileSync(file, `# 独立审查报告（R7）\n\n- 主会话: ${session.id}\n- 评估者会话: ${childId}\n- 生成时间: ${new Date().toISOString()}\n\n---\n\n${report}\n`, 'utf8')
