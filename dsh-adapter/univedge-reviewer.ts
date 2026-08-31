@@ -24,8 +24,8 @@ function findUnivEdgeRoot(start: string | undefined): string | undefined {
   return undefined
 }
 
-/** 提取审查输入包：任务描述 + 最终回复 + 产物路径。 */
-function extractReviewInput(session: any): { task: string; finalReply: string; artifacts: string[] } {
+/** 提取审查输入包：任务描述 + 最终回复（窗口化——L2-5）+ 产物路径。 */
+function extractReviewInput(session: any, startSeq = 0, endSeq = Number.MAX_SAFE_INTEGER): { task: string; finalReply: string; artifacts: string[] } {
   let task = ''
   let finalReply = ''
   const artifacts = new Set<string>()
@@ -36,7 +36,8 @@ function extractReviewInput(session: any): { task: string; finalReply: string; a
       const content = ev.data?.content ?? []
       const txt = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('')
       if (!task && txt.trim()) task = txt.trim().slice(0, 4000)
-    } else if (ev.type === 'assistant/message') {
+    } else if (ev.type === 'assistant/message' && typeof ev.seq === 'number' && ev.seq >= startSeq && ev.seq <= endSeq) {
+      // 只取触发轮区间内的回复（多轮任务中不取旧轮内容）
       const msg = ev.data?.message
       const content = msg?.content ?? []
       const txt = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('')
@@ -56,21 +57,36 @@ function extractReviewInput(session: any): { task: string; finalReply: string; a
 
 /** 触发判据：本 turn 内是否有"实质交付物"（写了产物文件 OR 文本明确指向产物文件）。
  * 无交付物的轮次（讨论/中间探索）不触发审查——审查的功能是产物质量把关，不是任务管理。
- * 注意：文本信号只用"明确指向产物文件"的表述（如"已写入 run/xxx.md"），抽象词
- * （"结论""已完成"）在讨论轮也常出现，会造成误触发。
+ * 实现要点（R7 审查 6f11970 修订）：
+ * - 信号 A：反序列化取路径字段匹配（原 `$` 锚定对 JSON 序列化永不匹配，是死代码——L0-1）；
+ *   白名单不含 todo_write（只写计划文本，非交付——L1-3）；
+ * - 信号 B：只匹配"完成态动词 + 文件名"（排除未来式规划句如"下一步将写入 x.md"——L1-2）。
  */
 function hasDeliverable(session: any, startSeq: number, endSeq: number): boolean {
   const evts = session?.events ?? []
-  const DELIVER_WORDS = /(已写入|写入 run\/|已保存到 run\/|产物在 run\/|conclusion\.md|contract\.md|conclusions?\.md|results?\.(md|json|txt))/i
+  const DELIVER_WORDS = /(?:已写入|已保存到|已保存至|产物在|写入完成|已落盘)\s*(?:run\/)?[^\s"']+\.(?:md|json|txt|csv|yaml|yml)\b/i
   for (const ev of evts) {
     if (typeof ev.seq !== 'number' || ev.seq < startSeq || ev.seq > endSeq) continue
     if (ev.type === 'tool/call') {
       const name = ev.data?.name ?? ev.data?.tool ?? ''
-      if (!['write', 'edit', 'str_replace_editor', 'todo_write'].includes(name)) continue
-      const s = JSON.stringify(ev.data ?? {})
-      // 产物存储 run/ 下的文件，或任意 .md 写入
-      if (/\brun\//.test(s) && /\.(md|json|txt|log|csv|yaml|yml|dat)$/i.test(s)) return true
-      if (/\.md"/i.test(s)) return true
+      if (!['write', 'edit', 'str_replace_editor'].includes(name)) continue
+      // 先反序列化取路径字段精确匹配；失败回退字符串匹配
+      let hit = false
+      try {
+        const parsed = typeof ev.data === 'object' ? ev.data : JSON.parse(String(ev.data ?? '{}'))
+        const candidates: string[] = [
+          parsed?.file_path, parsed?.path, parsed?.file, parsed?.filePath, parsed?.new_path, parsed?.newPath,
+          ...(Array.isArray(parsed?.items) ? parsed.items : []),
+        ].filter((p): p is string => typeof p === 'string')
+        hit = candidates.some((p) => (
+          /\brun\/[^\s"']*\.(md|json|txt|log|csv|yaml|yml|dat)\b/i.test(p) || /\.md\b/i.test(p)
+        ))
+      } catch { /* fall through */ }
+      if (!hit) {
+        const s = JSON.stringify(ev.data ?? {})
+        hit = /\brun\/[^\s"']*\.(md|json|txt|log|csv|yaml|yml|dat)\b/i.test(s) || /\.md"/i.test(s)
+      }
+      if (hit) return true
     } else if (ev.type === 'assistant/message') {
       const msg = ev.data?.message
       const content = msg?.content ?? []
@@ -81,13 +97,16 @@ function hasDeliverable(session: any, startSeq: number, endSeq: number): boolean
   return false
 }
 
-/** 本 turn 的起点 seq（最近的 turn/start，无则 0）。 */
+/** 本 turn 的起点 seq（最近的 turn/start；turn 字段缺失时回退到最后一个 user/message——L2-4）。 */
 function turnStartSeq(session: any, turn: number): number {
   let seq = 0
+  let lastUser = 0
   for (const ev of session?.events ?? []) {
-    if (ev.type === 'turn/start' && ev.data?.turn === turn && typeof ev.seq === 'number') seq = ev.seq
+    if (typeof ev.seq !== 'number') continue
+    if (ev.type === 'turn/start' && ev.data?.turn === turn) seq = ev.seq
+    if (ev.type === 'user/message') lastUser = ev.seq
   }
-  return seq
+  return seq || lastUser || 0
 }
 
 /** 构造评估者 prompt（怀疑派立场，L2 上下文解耦声明，问题分级）。 */
@@ -110,16 +129,16 @@ function buildReviewerPrompt(root: string, input: { task: string; finalReply: st
       ? `- 产物文件（请读取核实）：\n${input.artifacts.map((a) => `  - ${a}`).join('\n')}`
       : '- 产物文件：未在日志中识别到明确路径，请自行在工作区 run/ 等目录查找产物',
     '',
-    '【问题分级（重要，决定哪些需要用户确认）】',
-    '- **L0 实质问题**（会导致错误结论或违反核心方法论：锚点缺失、手算冒充、约定/量纲错误、验证失效）：必须列出，每条标注【需用户确认】；',
-    '- **L1 有文档依据的问题**（仓库文档/代码已明确但产物未遵循，如约定注册表已有条目、METHODOLOGY 明示规则）：自行判定并直接给出修正建议（引用依据出处），**不要求用户确认**；',
-    '- **L2 建议项**（改进空间、风格、可选优化）：只列出，不进确认流。',
+    '【问题分级（重要，决定哪些需要用户确认；严重度 S 系列，区别于权限门 L 系列与解耦等级——L1-1）】',
+    '- **S0 实质问题**（会导致错误结论或违反核心方法论：锚点缺失、手算冒充、约定/量纲错误、验证失效）：必须列出，每条标注【需用户确认】；',
+    '- **S1 有文档依据的问题**（仓库文档/代码已明确但产物未遵循，如约定注册表已有条目、METHODOLOGY 明示规则）：自行判定并直接给出修正建议（引用依据出处），**不要求用户确认**；',
+    '- **S2 建议项**（改进空间、风格、可选优化）：只列出，不进确认流。',
     '',
     '【输出格式】审查报告，包含：',
-    '1. 结论：通过 / 需修订（标注 L0 问题数）',
-    '2. L0 实质问题清单（如有）：每条含严重程度 + 证据 + 建议 + 【需用户确认】',
-    '3. L1 有依据问题（如有）：每条含依据出处 + 修正建议',
-    '4. L2 建议项（如有）',
+    '1. 结论：通过 / 需修订（标注 S0 问题数）',
+    '2. S0 实质问题清单（如有）：每条含严重程度 + 证据 + 建议 + 【需用户确认】',
+    '3. S1 有依据问题（如有）：每条含依据出处 + 修正建议',
+    '4. S2 建议项（如有）',
     '5. 逐条检查意见摘要（对照 VERIFICATION 检查项）',
     '6. 解耦声明：说明你在独立上下文运行，仅见审查输入包与产物文件（L2 上下文解耦），未见过主 agent 的推理链。',
   ]
@@ -152,11 +171,11 @@ export function apply(ctx: Context): void {
       return
     }
     diag('turn', turn, 'has deliverable, triggering runReview')
-    void runReview(ctx, session)
+    void runReview(ctx, session, turn, startSeq, endSeq)
   })
 }
 
-async function runReview(ctx: Context, session: any): Promise<void> {
+async function runReview(ctx: Context, session: any, turn?: number, startSeq?: number, endSeq?: number): Promise<void> {
   diag('runReview start, cwd:', session.header?.cwd)
   const cwd = session.header?.cwd
   const root = findUnivEdgeRoot(cwd)
@@ -165,7 +184,7 @@ async function runReview(ctx: Context, session: any): Promise<void> {
     return
   }
 
-  const input = extractReviewInput(session)
+  const input = extractReviewInput(session, startSeq ?? 0, endSeq ?? Number.MAX_SAFE_INTEGER)
   if (!input.task && !input.finalReply) {
     diag('no content to review, skip')
     return

@@ -10,7 +10,7 @@
 |---|---|
 | `univedge-l1-inject.ts` | dsh 插件：L1 双时机注入——`session-start` 全量（METHODOLOGY §0+§1 + 基层）+ `pre-step` 缺失时自动补精简版（长会话/compaction 保障） |
 | `univedge-hpc-gate.ts` | dsh 插件：注册 `submit_hpc_job` 工具——提交作业前强制 CHECK 字段校验（schema 层 `required` + execute 层非空校验双层门控） |
-| `univedge-reviewer.ts` | dsh 插件：任务完成后自动 spawn **独立评估者子 agent**（R7，怀疑派）审查产物，报告写入 `run/review/<主会话>/review.md`。**触发判据**：仅当 turn 内有"实质交付物"（写了 run/ 下产物文件 OR 文本明确指向产物文件）才审查——纯讨论/中间探索轮不触发；**问题分级**：L0 实质问题（标【需用户确认】）/ L1 有文档依据（自行判定+引用依据）/ L2 建议项（只进报告） |
+| `univedge-reviewer.ts` | dsh 插件：任务完成后自动 spawn **独立评估者子 agent**（R7，怀疑派）审查产物，报告写入 `run/review/<主会话>/review.md`。**触发判据**：仅当 turn 内有"实质交付物"（写了 run/ 下产物文件 OR 文本含"完成态动词+文件名"）才审查——纯讨论/规划句轮不触发；**问题分级**（S 系列严重度，区别于权限门 L 系列与解耦等级）：S0 实质问题（标【需用户确认】）/ S1 有文档依据（自行判定+引用依据）/ S2 建议项（只进报告）。R7 自审（2026-08-31）修复：run/ 非 .md 产物漏审（`$` 锚定死代码）、未来式规划句误触发、todo_write 误触发、turn 缺失回退 |
 | `analyze_session.py` | 协议遵守率统计脚本：解析 session.jsonl.zstd，输出 7 项指标（L0/L1/L2/工具代算/锚点） |
 | `cordis.patch.yml` | 注册以上插件的 patch（用 `--patch` 加载；"新增 entry"须用 `insert:` 语法） |
 | `test-runner.ts` + `test.patch.yml` | 测试专用：headless 主任务后不退出，轮询审查报告生成再退出（验证 reviewer 用） |
