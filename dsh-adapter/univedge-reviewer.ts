@@ -400,7 +400,8 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
     diag('wait failed:', String(e))
     recordFailure() // ④ 失败计数（熔断用；迟到回收成功时会经 collectLateReport 复位）
     // 缺陷 6：超时中止后迟到 turn/end 的完整报告回收——先查当前会话事件，再挂迟到监听，杜绝静默丢失
-    void collectLateReport(ctx, root, session, childId, startSeq, endSeq)
+    // S1-2（selfcheck 2026-08-31）：透传 turn/channel——迟到回收的报告头须标注真实触发通道，否则观察期 A 指标（declared 占比）被系统性拉低
+    void collectLateReport(ctx, root, session, childId, startSeq, endSeq, turn, channel)
     return
   }
 
@@ -465,7 +466,7 @@ function persistEmpty(root: string, session: any, childId: string, startSeq?: nu
 
 /** 缺陷 6：超时中止后回收迟到报告——先查当前会话事件（竞态窗口），再挂迟到监听（限时 5 分钟），
  * 仍无报告则落盘"中止"记录。杜绝"wait failed 后直接 return"导致的迟到完整报告静默丢失。 */
-async function collectLateReport(ctx: Context, root: string, session: any, childId: string | undefined, startSeq?: number, endSeq?: number): Promise<void> {
+async function collectLateReport(ctx: Context, root: string, session: any, childId: string | undefined, startSeq?: number, endSeq?: number, turn?: number, channel = 'auto'): Promise<void> {
   if (!childId) return
   diag('collectLateReport start, child:', childId)
   const tryPick = (): string => {
@@ -476,7 +477,7 @@ async function collectLateReport(ctx: Context, root: string, session: any, child
   const immediate = tryPick()
   if (immediate) {
     diag('late report already available, persisting')
-    persistReport(root, session, childId, immediate)
+    persistReport(root, session, childId, immediate, undefined, turn, channel)
     return
   }
   // 2) 挂迟到监听（限时 5 分钟）：子代理稍后完成 turn/end 则回收
@@ -494,7 +495,7 @@ async function collectLateReport(ctx: Context, root: string, session: any, child
     const late = tryPick()
     if (late) {
       diag('late report recovered')
-      persistReport(root, session, childId, late)
+      persistReport(root, session, childId, late, undefined, turn, channel)
       recordSuccess(session.id) // 迟到回收成功 = 复位失败计数 + 记录成功时间（P0-A）
     } else {
       diag('late turn/end but no report text, persisting empty')

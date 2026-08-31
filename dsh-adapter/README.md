@@ -14,7 +14,7 @@
 | `analyze_session.py` | 协议遵守率统计脚本：解析 session.jsonl.zstd，输出 7 项指标（L0/L1/L2/工具代算/锚点） |
 | `cordis.patch.yml` | 注册以上插件的 patch（用 `--patch` 加载；"新增 entry"须用 `insert:` 语法） |
 | `test-runner.ts` + `test.patch.yml` | 测试专用：headless 主任务后不退出，轮询审查报告生成再退出（验证 reviewer 用） |
-| `tests/reviewer-deliverable.ts` + `test-results/` | reviewer 逻辑单元测试（import reviewer-shared，61 用例：触发判据 A/B + 缺陷 2/3/4 + S1-1/S1-4/S1-5 + S2-2 + 风暴抑制 P0-A/P0-B/P1-A + r7- 豁免 + @review 声明通道）+ 落盘结果（如 `test-results/2026-08-31-reviewer-deliverable.md`）——运行 `tsx --tsconfig <dsh>/tsconfig.json tests/reviewer-deliverable.ts`；"通过"声明的可核产物 |
+| `tests/reviewer-deliverable.ts` + `test-results/` | reviewer 逻辑单元测试（import reviewer-shared，67 用例：触发判据 A/B + 缺陷 2/3/4 + S1-1/S1-4/S1-5 + S2-2 + 风暴抑制 P0-A/P0-B/P1-A + r7- 豁免 + @review 声明通道）+ 落盘结果（如 `test-results/2026-08-31-reviewer-deliverable.md`）——运行 `tsx --tsconfig <dsh>/tsconfig.json tests/reviewer-deliverable.ts`；"通过"声明的可核产物 |
 
 ## 机制（分层）
 
