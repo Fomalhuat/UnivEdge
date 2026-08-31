@@ -13,10 +13,59 @@ function diag(...args: any[]): void {
 export const name = 'univedge-reviewer'
 export const inject = ['subagents', 'agents']
 
-/** 审查输出目录（相对 workspace 根）。hasDeliverable 的排除判断与写盘路径必须引用同一常量——
- * "审查自输出目录永不触发审查"（防自激循环）是通用原则，不依赖具体使用者的工作流；
- * 若改输出目录，只需改此处，排除逻辑自动同步（可移植性）。 */
-const REVIEW_DIR = 'run/review'
+// ---- 防护机制（handoff-reviewer-storm-cost 修复：防 token 风暴复发）----
+/** ① 环境变量硬开关：UNIVEDGE_DISABLE_REVIEWER=1 彻底禁用审查（最高优先级，可逆）。 */
+const REVIEWER_DISABLED = process.env.UNIVEDGE_DISABLE_REVIEWER === '1'
+/** ② 熔断器：连续失败 N 次 → 自动禁用审查 X 分钟（防 token 不足雪崩）。 */
+const CIRCUIT_FAIL_THRESHOLD = 5
+const CIRCUIT_OPEN_MS = 15 * 60 * 1000
+/** ③ 硬限流：同一会话每天审查次数上限。 */
+const DAILY_REVIEW_LIMIT = 10
+
+let consecutiveFailures = 0
+let circuitOpenUntil = 0
+const dailyCounts = new Map<string, { day: string; count: number }>()
+
+function recordFailure(): void {
+  consecutiveFailures += 1
+  if (consecutiveFailures >= CIRCUIT_FAIL_THRESHOLD) {
+    circuitOpenUntil = Date.now() + CIRCUIT_OPEN_MS
+    diag(`CIRCUIT OPEN: ${consecutiveFailures} consecutive failures, review disabled ${CIRCUIT_OPEN_MS / 60000}min until ${new Date(circuitOpenUntil).toISOString()}`)
+  }
+}
+
+function recordSuccess(): void {
+  consecutiveFailures = 0
+}
+
+function circuitOpen(): boolean {
+  if (Date.now() >= circuitOpenUntil) {
+    if (circuitOpenUntil > 0) {
+      diag('CIRCUIT CLOSED (cooldown elapsed)')
+      circuitOpenUntil = 0
+      consecutiveFailures = 0
+    }
+    return false
+  }
+  return true
+}
+
+function underDailyLimit(sessionId: string): boolean {
+  const day = new Date().toISOString().slice(0, 10)
+  const rec = dailyCounts.get(sessionId)
+  if (!rec || rec.day !== day) {
+    dailyCounts.set(sessionId, { day, count: 0 })
+    return true
+  }
+  return rec.count < DAILY_REVIEW_LIMIT
+}
+
+function countReview(sessionId: string): void {
+  const day = new Date().toISOString().slice(0, 10)
+  const rec = dailyCounts.get(sessionId)
+  if (!rec || rec.day !== day) dailyCounts.set(sessionId, { day, count: 1 })
+  else rec.count += 1
+}
 
 /** 从 workspace（session cwd）向上发现 UnivEdge 根：含 METHODOLOGY.md 的目录。 */
 function findUnivEdgeRoot(start: string | undefined): string | undefined {
@@ -155,6 +204,11 @@ function buildReviewerPrompt(root: string, input: { task: string; finalReply: st
 }
 
 export function apply(ctx: Context): void {
+  // ① 环境变量硬开关（最高优先级）：彻底切断任何触发路径
+  if (REVIEWER_DISABLED) {
+    diag('reviewer disabled via UNIVEDGE_DISABLE_REVIEWER=1')
+    return
+  }
   let mainId: string | undefined
   diag('apply called')
 
@@ -172,6 +226,15 @@ export function apply(ctx: Context): void {
     diag('turn/end seen: session', session.id, 'origin:', session.header?.origin, 'mainId:', mainId)
     if (mainId !== undefined && session.id !== mainId) return
     if (session.header?.origin === 'subagent') return
+    // 防护机制（②熔断 / ③限流）——在触发判据前拦截，防 token 风暴复发
+    if (circuitOpen()) {
+      diag('turn', event.data?.turn, 'circuit open, skip review')
+      return
+    }
+    if (!underDailyLimit(session.id)) {
+      diag('turn', event.data?.turn, 'daily review limit reached, skip')
+      return
+    }
     // 触发判据：本 turn 有实质交付物才审查（无产物的讨论轮不触发）
     const turn = event.data?.turn
     const endSeq = event.seq
@@ -181,6 +244,7 @@ export function apply(ctx: Context): void {
       return
     }
     diag('turn', turn, 'has deliverable, triggering runReview')
+    countReview(session.id)
     void runReview(ctx, session, turn, startSeq, endSeq)
   })
 }
@@ -228,6 +292,7 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
     diag('reviewer child spawned:', childId)
   } catch (e) {
     diag('spawn failed:', String(e))
+    recordFailure() // ④ 失败计数（熔断用）
     return
   }
 
@@ -248,6 +313,7 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
     diag('reviewer child turn/end received')
   } catch (e) {
     diag('wait failed:', String(e))
+    recordFailure() // ④ 失败计数（熔断用；迟到回收成功时会经 collectLateReport 复位）
     // 缺陷 6：超时中止后迟到 turn/end 的完整报告回收——先查当前会话事件，再挂迟到监听，杜绝静默丢失
     void collectLateReport(ctx, root, session, childId, startSeq, endSeq)
     return
@@ -261,12 +327,14 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
   if (!report) {
     // 缺陷 2：空报告显式落盘（含 childId/时间/turn 窗口），而非静默 return——供诊断 token/速率限制
     diag('no report text, persisting empty-report record')
+    recordFailure() // ④ 失败计数（空报告 = 失败，token 不足信号）
     persistEmpty(root, session, childId, startSeq, endSeq)
     return
   }
 
   // 写审查报告（缺陷 3：按评估者会话分目录，杜绝后写覆盖先写）
   persistReport(root, session, childId, report)
+  recordSuccess() // 报告落盘 = 成功，复位失败计数
 }
 
 /** 写审查报告（缺陷 3：按评估者会话分目录）。 */
@@ -319,13 +387,16 @@ async function collectLateReport(ctx: Context, root: string, session: any, child
     if (late) {
       diag('late report recovered')
       persistReport(root, session, childId, late)
+      recordSuccess() // 迟到回收成功 = 复位失败计数
     } else {
       diag('late turn/end but no report text, persisting empty')
+      recordFailure()
       persistEmpty(root, session, childId, startSeq, endSeq)
     }
   } catch {
     // 3) 迟到超时仍无报告 → 落盘"中止"记录（可诊断）
     diag('late report timeout, persisting abort record')
+    recordFailure()
     persistEmpty(root, session, childId, startSeq, endSeq)
   }
 }
