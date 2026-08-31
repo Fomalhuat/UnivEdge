@@ -16,6 +16,8 @@ export function isReviewSelfOutput(p: string): boolean {
   if (!p.includes('run/')) return false
   // 分目录正式报告：run/review/<主8>/<评估者8>/review.md
   if (new RegExp(`${REVIEW_DIR}/${HEX8}/${HEX8}/review\\.md$`).test(p)) return true
+  // 单层旧格式（迁移期历史槽）：run/review/<主8>/review.md——完善项 1（历史报告也是自输出）
+  if (new RegExp(`${REVIEW_DIR}/${HEX8}/review\\.md$`).test(p)) return true
   // 空报告记录：run/review/<主8>/empty/
   if (new RegExp(`${REVIEW_DIR}/${HEX8}/empty/`).test(p)) return true
   // 自检产物目录（用户裁定）
@@ -58,16 +60,17 @@ export function emptyOutDir(root: string, mainId: string): string {
   return `${root}/${REVIEW_DIR}/${main8}/empty`
 }
 
-/** 报告提取：含报告标志的实质消息中取最长（S2-2：防"长分析/长报错"顶掉报告，也防摘要桩）。 */
+/** 报告提取：含报告专有锚的实质消息中取最长（完善项 3b：去高频词"通过/S0/S1/S2"——中间分析也常含，
+ * 改用报告结构专有锚；防"长分析顶掉报告"）。 */
 export function pickReport(events: any[]): string {
-  const REPORT_FLAG = /(结论|需修订|通过|S0|S1|S2|解耦声明|审查报告)/i
+  const REPORT_FLAG = /(##\s*结论|#\s*独立审查报告|解耦声明|需修订|问题清单|实质问题清单|S0 实质|S1 有依据|S2 建议)/i
   let best = ''
   for (const ev of events) {
     if (ev.type !== 'assistant/message') continue
     const content = ev.data?.message?.content ?? []
     const txt = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('').trim()
     if (!txt) continue
-    if (!REPORT_FLAG.test(txt)) continue // 只考虑含报告标志的消息（排除纯思考/中间输出）
+    if (!REPORT_FLAG.test(txt)) continue // 只考虑含报告专有锚的消息（排除纯思考/中间输出）
     if (txt.length > best.length) best = txt
   }
   return best

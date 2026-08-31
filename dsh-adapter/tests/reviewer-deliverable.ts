@@ -27,6 +27,7 @@ check('write run/foo.json（非 .md run/ 产物）', isArtifactPath('run/foo.jso
 check('write run/foo.md', isArtifactPath('run/foo.md'), true, '基础')
 check('write 任意 .md（非 run/）', isArtifactPath('notes/summary.md'), true, '设计')
 check('写审计自输出：run/review/<主>/<评估者>/review.md', isArtifactPath('run/review/9e496951/9546ca98/review.md'), false, '自输出')
+check('单层旧格式槽：run/review/<主>/review.md（完善项 1）', isArtifactPath('run/review/9e496951/review.md'), false, '完善项1')
 check('写空报告记录：run/review/<主>/empty/', isArtifactPath('run/review/9e496951/empty/9546ca98.md'), false, '自输出')
 check('写 selfcheck 输入包：run/review-selfcheck/input.md', isArtifactPath('run/review-selfcheck/input.md'), false, 'S1-5')
 check('写 handoff：run/review/handoff-bc.md（重新进入审查面）', isArtifactPath('run/review/handoff-bc.md'), true, 'S1-1')
@@ -65,6 +66,13 @@ check('长分析不顶掉报告（无报告标志的分析被过滤）',
   ]),
   '## 结论：通过\n逐条检查……\n解耦声明：L2',
   'S2-2')
+check('长分析含高频词"通过"不顶掉报告（完善项 3b：专有锚过滤）',
+  pickReport([
+    { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '这个公式通过了所有验证……通过检查……通过……'.repeat(120) }] } } },
+    { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '## 结论：需修订\n问题清单：……\n解耦声明：独立上下文' }] } } },
+  ]),
+  '## 结论：需修订\n问题清单：……\n解耦声明：独立上下文',
+  '完善项3b')
 check('空事件 → 空报告', pickReport([]), '', '缺陷2路径')
 check('纯中间思考（无报告标志）→ 空', pickReport([{ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '我正在检查文件的第 3 行……' }] } } }]), '', '缺陷2路径')
 

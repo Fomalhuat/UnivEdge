@@ -30,8 +30,8 @@ function findUnivEdgeRoot(start: string | undefined): string | undefined {
   return undefined
 }
 
-/** 提取审查输入包：任务描述 + 最终回复（窗口化——L2-5）+ 产物路径。 */
-function extractReviewInput(session: any, startSeq = 0, endSeq = Number.MAX_SAFE_INTEGER): { task: string; finalReply: string; artifacts: string[] } {
+/** 提取审查输入包：任务描述 + 最终回复（窗口化——L2-5）+ 产物路径（含读取时刻——完善项 2/3a）。 */
+function extractReviewInput(session: any, startSeq = 0, endSeq = Number.MAX_SAFE_INTEGER): { task: string; finalReply: string; artifacts: string[]; snapshotAt: string } {
   let task = ''
   let finalReply = ''
   const artifacts = new Set<string>()
@@ -58,7 +58,9 @@ function extractReviewInput(session: any, startSeq = 0, endSeq = Number.MAX_SAFE
       }
     }
   }
-  return { task, finalReply, artifacts: [...artifacts].slice(0, 12) }
+  // 完善项 3a：过滤已删除/改名的陈旧路径（如 r7-9546ca98 已改名 r7-348151ae，不再存在）
+  const existing = [...artifacts].filter((p) => existsSync(p))
+  return { task, finalReply, artifacts: existing.slice(0, 12), snapshotAt: new Date().toISOString() }
 }
 
 /** 触发判据：本 turn 内是否有"实质交付物"（写了产物文件 OR 文本明确指向产物文件）。
@@ -115,7 +117,7 @@ function turnStartSeq(session: any, turn: number): number {
 }
 
 /** 构造评估者 prompt（怀疑派立场，L2 上下文解耦声明，问题分级）。 */
-function buildReviewerPrompt(root: string, input: { task: string; finalReply: string; artifacts: string[] }): string {
+function buildReviewerPrompt(root: string, input: { task: string; finalReply: string; artifacts: string[]; snapshotAt: string }): string {
   const lines = [
     '你是 UnivEdge 的独立审查评估者（R7，怀疑派）。以下是主 agent 完成物理科研任务后的审查请求。',
     '',
@@ -133,6 +135,8 @@ function buildReviewerPrompt(root: string, input: { task: string; finalReply: st
     input.artifacts.length
       ? `- 产物文件（请读取核实）：\n${input.artifacts.map((a) => `  - ${a}`).join('\n')}`
       : '- 产物文件：未在日志中识别到明确路径，请自行在工作区 run/ 等目录查找产物',
+    '',
+    `- **审查基于 ${input.snapshotAt} 的产物状态**（完善项 2：产物可能在审查窗口内被并发改写；若你读取时发现与输入包描述不符，请在报告中标注"疑似审查窗口内被改写"）。`,
     '',
     '【问题分级（重要，决定哪些需要用户确认；严重度 S 系列，区别于权限门 L 系列与解耦等级——L1-1）】',
     '- **S0 实质问题**（会导致错误结论或违反核心方法论：锚点缺失、手算冒充、约定/量纲错误、验证失效）：必须列出，每条标注【需用户确认】；',

@@ -10,6 +10,7 @@
 | write run/foo.md | true | true | 基础 | ✅ |
 | write 任意 .md（非 run/） | true | true | 设计 | ✅ |
 | 写审计自输出：run/review/<主>/<评估者>/review.md | false | false | 自输出 | ✅ |
+| 单层旧格式槽：run/review/<主>/review.md（完善项 1） | false | false | 完善项1 | ✅ |
 | 写空报告记录：run/review/<主>/empty/ | false | false | 自输出 | ✅ |
 | 写 selfcheck 输入包：run/review-selfcheck/input.md | false | false | S1-5 | ✅ |
 | 写 handoff：run/review/handoff-bc.md（重新进入审查面） | true | true | S1-1 | ✅ |
@@ -32,9 +33,14 @@ S0 问题清单……
 解耦声明：L2 | ## 结论：通过
 逐条检查……
 解耦声明：L2 | S2-2 | ✅ |
+| 长分析含高频词"通过"不顶掉报告（完善项 3b：专有锚过滤） | ## 结论：需修订
+问题清单：……
+解耦声明：独立上下文 | ## 结论：需修订
+问题清单：……
+解耦声明：独立上下文 | 完善项3b | ✅ |
 | 空事件 → 空报告 |  |  | 缺陷2路径 | ✅ |
 | 纯中间思考（无报告标志）→ 空 |  |  | 缺陷2路径 | ✅ |
 | 非审查路径不排除 | false | false | 精确性 | ✅ |
 | r7- 存档不排除（可被审） | false | false | S1-1 | ✅ |
 
-**22/22 通过, 0 失败**
+**24/24 通过, 0 失败**
