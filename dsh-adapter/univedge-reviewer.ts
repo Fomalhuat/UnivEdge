@@ -12,6 +12,11 @@ function diag(...args: any[]): void {
 export const name = 'univedge-reviewer'
 export const inject = ['subagents', 'agents']
 
+/** 审查输出目录（相对 workspace 根）。hasDeliverable 的排除判断与写盘路径必须引用同一常量——
+ * "审查自输出目录永不触发审查"（防自激循环）是通用原则，不依赖具体使用者的工作流；
+ * 若改输出目录，只需改此处，排除逻辑自动同步（可移植性）。 */
+const REVIEW_DIR = 'run/review'
+
 /** 从 workspace（session cwd）向上发现 UnivEdge 根：含 METHODOLOGY.md 的目录。 */
 function findUnivEdgeRoot(start: string | undefined): string | undefined {
   let dir = start
@@ -65,10 +70,11 @@ function extractReviewInput(session: any, startSeq = 0, endSeq = Number.MAX_SAFE
 function hasDeliverable(session: any, startSeq: number, endSeq: number): boolean {
   const evts = session?.events ?? []
   const DELIVER_WORDS = /(?:已写入|已保存到|已保存至|产物在|写入完成|已落盘)\s*(?:run\/)?[^\s"']+\.(?:md|json|txt|csv|yaml|yml)\b/i
-  // 交付物路径判定：run/ 下产物或任意 .md，但排除审计元数据（run/review/ 下自身产物——handoff-reviewer-fix 缺陷 1）
+  // 交付物路径判定：run/ 下产物或任意 .md，但排除审计元数据（审查自输出目录 REVIEW_DIR——handoff-reviewer-fix 缺陷 1）
+  // 注意：匹配 REVIEW_DIR + '/'（目录边界），避免误伤同名前缀目录（如 run/review-test2/）
   const isArtifact = (p: string): boolean => (
     (/\brun\/[^\s"']*\.(md|json|txt|log|csv|yaml|yml|dat)\b/i.test(p) || /\.md\b/i.test(p))
-    && !/\brun\/review\//i.test(p)
+    && !p.includes(`${REVIEW_DIR}/`)
   )
   for (const ev of evts) {
     if (typeof ev.seq !== 'number' || ev.seq < startSeq || ev.seq > endSeq) continue
@@ -96,7 +102,7 @@ function hasDeliverable(session: any, startSeq: number, endSeq: number): boolean
       const content = msg?.content ?? []
       const txt = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('')
       // 文本层同样排除审计路径表述（缺陷 1 修复：文档维护轮说"已写入 run/review/…"不触发）
-      if (!/\brun\/review\//i.test(txt) && DELIVER_WORDS.test(txt)) return true
+      if (!txt.includes(`${REVIEW_DIR}/`) && DELIVER_WORDS.test(txt)) return true
     }
   }
   return false
@@ -269,7 +275,7 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
   if (!report) {
     // 缺陷 2：空报告显式落盘（含 childId/时间/turn 窗口），而非静默 return——供诊断 token/速率限制
     diag('no report text, persisting empty-report record')
-    const emptyDir = join(root, 'run', 'review', shortId, 'empty')
+    const emptyDir = join(root, REVIEW_DIR, shortId, 'empty')
     mkdirSync(emptyDir, { recursive: true })
     writeFileSync(join(emptyDir, `${shortChild}.md`),
       `# 空报告记录\n\n- 主会话: ${session.id}\n- 评估者会话: ${childId}\n- 时间: ${new Date().toISOString()}\n- turn 窗口: ${startSeq}-${endSeq}\n- 状态: 评估者结束但未产出文本（可能 token 额度/速率限制）\n`, 'utf8')
@@ -277,7 +283,7 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
   }
 
   // 写审查报告（缺陷 3：按评估者会话分目录，杜绝后写覆盖先写）
-  const dir = join(root, 'run', 'review', shortId, shortChild)
+  const dir = join(root, REVIEW_DIR, shortId, shortChild)
   mkdirSync(dir, { recursive: true })
   const file = join(dir, 'review.md')
   writeFileSync(file, `# 独立审查报告（R7）\n\n- 主会话: ${session.id}\n- 评估者会话: ${childId}\n- 生成时间: ${new Date().toISOString()}\n\n---\n\n${report}\n`, 'utf8')

@@ -19,10 +19,13 @@
  */
 function hasDeliverable(events, startSeq, endSeq) {
   const DELIVER_WORDS = /(?:已写入|已保存到|已保存至|产物在|写入完成|已落盘)\s*(?:run\/)?[^\s"']+\.(?:md|json|txt|csv|yaml|yml)\b/i
-  // 交付物路径判定：run/ 下产物或任意 .md，但排除审计元数据（run/review/ 下自身产物——handoff-reviewer-fix 缺陷 1）
+  // 审查自输出目录（与 univedge-reviewer.ts 的 REVIEW_DIR 常量一致）——"自输出永不触发审查"是通用原则
+  const REVIEW_DIR = 'run/review'
+  // 交付物路径判定：run/ 下产物或任意 .md，但排除审查自输出目录（handoff-reviewer-fix 缺陷 1）
+  // 注意：匹配 REVIEW_DIR + '/'（目录边界），避免误伤同名前缀目录（如 run/review-test2/）
   const isArtifact = (p) => (
     (/\brun\/[^\s"']*\.(md|json|txt|log|csv|yaml|yml|dat)\b/i.test(p) || /\.md\b/i.test(p))
-    && !/\brun\/review\//i.test(p)
+    && !p.includes(REVIEW_DIR + '/')
   )
   for (const ev of events) {
     if (typeof ev.seq !== 'number' || ev.seq < startSeq || ev.seq > endSeq) continue
@@ -45,7 +48,7 @@ function hasDeliverable(events, startSeq, endSeq) {
     } else if (ev.type === 'assistant/message') {
       const content = ev.data?.message?.content ?? []
       const txt = content.filter((b) => b?.type === 'text').map((b) => b.text).join('')
-      if (!/\brun\/review\//i.test(txt) && DELIVER_WORDS.test(txt)) return true
+      if (!txt.includes(REVIEW_DIR + '/') && DELIVER_WORDS.test(txt)) return true
     }
   }
   return false
