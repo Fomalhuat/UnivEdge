@@ -10,11 +10,11 @@
 |---|---|
 | `univedge-l1-inject.ts` | dsh 插件：L1 双时机注入——`session-start` 全量（METHODOLOGY §0+§1 + 基层）+ `pre-step` 缺失时自动补精简版（长会话/compaction 保障） |
 | `univedge-hpc-gate.ts` | dsh 插件：注册 `submit_hpc_job` 工具——提交作业前强制 CHECK 字段校验（schema 层 `required` + execute 层非空校验双层门控） |
-| `univedge-reviewer.ts` + `reviewer-shared.ts` | dsh 插件：任务完成后自动 spawn **独立评估者子 agent**（R7，怀疑派）审查产物，报告写入 `run/review/<主会话8>/<评估者8>/review.md`（分目录，杜绝覆盖）。**触发判据**：仅当 turn 内有"实质交付物"（写了产物文件 OR 文本含"完成态动词+路径"）才审查——讨论/规划句轮不触发；**审查自输出**（本审查器写的报告/空记录/selfcheck 产物）永不触发（防自激）；handoff 等审计文档在审查面内（可被审）。**问题分级**（S 系列严重度）：S0 实质（标【需用户确认】）/ S1 有依据（自行判定）/ S2 建议。共享逻辑在 `reviewer-shared.ts`（单一事实来源，源码与测试共用）。R7 两轮自审（2026-08-31）修复：`$` 锚定死代码、规划句误触发、todo_write 误触发、触发风暴（审计自输出排除）、空报告落盘、分目录写盘、摘要桩、报告标志提取 |
+| `univedge-reviewer.ts` + `reviewer-shared.ts` | dsh 插件：任务完成后自动 spawn **独立评估者子 agent**（R7，怀疑派）审查产物，报告写入 `run/review/<主会话8>/<评估者8>/review.md`（分目录，杜绝覆盖）。**触发判据**：仅当 turn 内有"实质交付物"（写了产物文件 OR 文本含"完成态动词+路径"）才审查——讨论/规划句轮不触发；**审查自输出**（本审查器写的报告/空记录/selfcheck 产物/r7- 存档）永不触发（防自激）；handoff 等审计文档在审查面内（可被审）。**问题分级**（S 系列严重度）：S0 实质（标【需用户确认】）/ S1 有依据（自行判定）/ S2 建议。共享逻辑在 `reviewer-shared.ts`（单一事实来源，源码与测试共用）。R7 两轮自审（2026-08-31）修复：`$` 锚定死代码、规划句误触发、todo_write 误触发、触发风暴（审计自输出排除）、空报告落盘、分目录写盘、摘要桩、报告标志提取。**审查风暴抑制**（2026-08-31 review-storm-diagnosis）：P0-A 冷却期（同主会话 15min 窗口内成功审查 ≥2 次 → 暂停自动审查，延迟不丢弃；`UNIVEDGE_REVIEW_COOLDOWN_MIN`/`UNIVEDGE_REVIEW_MAX_PER_WINDOW` 可调）+ P0-B 产物 hash 去重（内容未变不重审）+ P1-A quiet 指令（turn 文本含 `--no-review` 或 `review:off` 即跳过）+ P2-A 触发可见性（报告头标注触发 turn；diag 记录触发产物） |
 | `analyze_session.py` | 协议遵守率统计脚本：解析 session.jsonl.zstd，输出 7 项指标（L0/L1/L2/工具代算/锚点） |
 | `cordis.patch.yml` | 注册以上插件的 patch（用 `--patch` 加载；"新增 entry"须用 `insert:` 语法） |
 | `test-runner.ts` + `test.patch.yml` | 测试专用：headless 主任务后不退出，轮询审查报告生成再退出（验证 reviewer 用） |
-| `tests/reviewer-deliverable.ts` + `test-results/` | reviewer 逻辑单元测试（import reviewer-shared，22 用例：触发判据 A/B + 缺陷 2/3/4 + S1-1/S1-4/S1-5 + S2-2）+ 落盘结果（如 `test-results/2026-08-31-reviewer-deliverable.md`）——运行 `tsx --tsconfig <dsh>/tsconfig.json tests/reviewer-deliverable.ts`；"通过"声明的可核产物 |
+| `tests/reviewer-deliverable.ts` + `test-results/` | reviewer 逻辑单元测试（import reviewer-shared，54 用例：触发判据 A/B + 缺陷 2/3/4 + S1-1/S1-4/S1-5 + S2-2 + 风暴抑制 P0-A/P0-B/P1-A + r7- 豁免）+ 落盘结果（如 `test-results/2026-08-31-reviewer-deliverable.md`）——运行 `tsx --tsconfig <dsh>/tsconfig.json tests/reviewer-deliverable.ts`；"通过"声明的可核产物 |
 
 ## 机制（分层）
 
@@ -25,6 +25,7 @@
   - `agent/pre-step`：每步前检查 L1 是否仍在模型可见上下文（session surface）——被 dsh 自动 compaction（token 压力/上下文溢出）影子化后**自动重新注入精简版**（基层 + 契约要点 + 产物格式，~25 行）。与 `agent-instructions`（AGENTS.md 每步注入）同模式；仅缺失时注入，避免每步重复的 token 成本。
   - 实测（7 步任务）：全量 1 次 + 精简版 1 次（step 2 处 surface 时序竞争窗口补位，无害），step 3+ 去重生效零注入。
 - **workspace 发现**：插件用 `agent.session.header.cwd`（session 的 workspace）向上找含 `METHODOLOGY.md` 的目录（最多 16 层）；找不到则不注入（不干扰其他 workspace）。
+- **审查风暴抑制**（reviewer 附带，2026-08-31 review-storm-diagnosis 修复）：触发判据只问"有无交付物"不问"是否已被审过"，导致 审查→修订→审查 反馈环（2h 6 次审查）。补三层感知：**冷却期**（同主会话滑动窗口内成功审查 ≥`UNIVEDGE_REVIEW_MAX_PER_WINDOW`（默认 2）次 → 暂停自动审查 `UNIVEDGE_REVIEW_COOLDOWN_MIN`（默认 15）分钟，延迟不丢弃）；**hash 去重**（产物内容与上次被审时全同 → 跳过）；**quiet 指令**（turn 文本含 `--no-review` / `review:off` → 跳过，替代全关硬开关）。判定逻辑均为 `reviewer-shared.ts` 纯函数（可单测），`univedge-reviewer.ts` 只维护状态。检查顺序：熔断 → 限流 → quiet → 判据 → 冷却 → hash → 触发。
 
 ## 安装（一次性，headless 与 Web 共用）
 
