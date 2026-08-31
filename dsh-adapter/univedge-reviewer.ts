@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport } from './reviewer-shared'
+import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport } from './reviewer-shared.ts'
 
 /** 诊断日志（临时，定位后移除）。 */
 function diag(...args: any[]): void {
