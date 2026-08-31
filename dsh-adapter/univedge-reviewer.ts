@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport } from './reviewer-shared.ts'
+import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport, extractTaskName, extractConclusion, appendReviewIndex, REVIEW_DIR } from './reviewer-shared.ts'
 
 /** 诊断日志（临时，定位后移除）。 */
 function diag(...args: any[]): void {
@@ -335,17 +335,25 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
   }
 
   // 写审查报告（缺陷 3：按评估者会话分目录，杜绝后写覆盖先写）
-  persistReport(root, session, childId, report)
+  const task = extractTaskName(input.artifacts) // 从触发轮产物路径提取任务名（可空，仅进索引）
+  persistReport(root, session, childId, report, task)
   recordSuccess() // 报告落盘 = 成功，复位失败计数
 }
 
-/** 写审查报告（缺陷 3：按评估者会话分目录）。 */
-function persistReport(root: string, session: any, childId: string, report: string): void {
+/** 写审查报告（缺陷 3：按评估者会话分目录）+ 追加审查索引（INDEX.md，管理入口）。 */
+function persistReport(root: string, session: any, childId: string, report: string, task?: string): void {
   const dir = reviewOutDir(root, session.id, childId)
   mkdirSync(dir, { recursive: true })
   const file = join(dir, 'review.md')
   writeFileSync(file, `# 独立审查报告（R7）\n\n- 主会话: ${session.id}\n- 评估者会话: ${childId}\n- 生成时间: ${new Date().toISOString()}\n\n---\n\n${report}\n`, 'utf8')
   diag('report written:', file)
+  appendReviewIndex(root, {
+    mainId: session.id,
+    childId,
+    conclusion: extractConclusion(report),
+    task,
+    reportPath: `${REVIEW_DIR}/${String(session.id).replace(/^session-/, '').slice(0, 8)}/${String(childId).replace(/^session-/, '').slice(0, 8)}/review.md`,
+  })
 }
 
 /** 空报告/中止记录落盘（缺陷 2 + 缺陷 6）。 */

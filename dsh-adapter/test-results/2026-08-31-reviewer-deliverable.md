@@ -42,5 +42,15 @@ S0 问题清单……
 | 纯中间思考（无报告标志）→ 空 |  |  | 缺陷2路径 | ✅ |
 | 非审查路径不排除 | false | false | 精确性 | ✅ |
 | r7- 存档不排除（可被审） | false | false | S1-1 | ✅ |
+| 新 selfcheck 路径：run/review/selfcheck/input.md 是自输出 | true | true | 结构 | ✅ |
+| run/ 顶层任务目录（非 review 前缀）不是自输出 | true | true | 结构 | ✅ |
+| 从产物路径提取任务名 | step4a | step4a | 索引 | ✅ |
+| 取最后匹配（当前活动任务） | l4-task1 | l4-task1 | 索引 | ✅ |
+| review 前缀不算任务名 | undefined | undefined | 索引 | ✅ |
+| 无产物路径 → 无任务名 | undefined | undefined | 索引 | ✅ |
+| 结论提取（需修订） | 需修订 | 需修订 | 索引 | ✅ |
+| 结论提取（通过） | 通过 | 通过 | 索引 | ✅ |
+| 结论提取（未知） | （未知） | （未知） | 索引 | ✅ |
+| 索引路径 | /home/u/UnivEdge/run/review/INDEX.md | /home/u/UnivEdge/run/review/INDEX.md | 索引 | ✅ |
 
-**24/24 通过, 0 失败**
+**34/34 通过, 0 失败**

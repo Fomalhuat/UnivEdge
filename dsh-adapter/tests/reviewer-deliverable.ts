@@ -10,7 +10,7 @@
  *    自检产物排除（S1-5）、文本层按路径片段粒度不连坐（S1-4）
  *  - 缺陷 2（空报告落盘路径）/ 缺陷 3（分目录写盘路径）/ 缺陷 4 + S2-2（pickReport 报告提取）
  */
-import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport, isReviewSelfOutput } from '../reviewer-shared'
+import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport, isReviewSelfOutput, extractTaskName, extractConclusion, reviewIndexPath } from '../reviewer-shared'
 
 let pass = 0
 let fail = 0
@@ -79,6 +79,18 @@ check('纯中间思考（无报告标志）→ 空', pickReport([{ type: 'assist
 // ---------- 6. isReviewSelfOutput 精确性 ----------
 check('非审查路径不排除', isReviewSelfOutput('run/step5/data.csv'), false, '精确性')
 check('r7- 存档不排除（可被审）', isReviewSelfOutput('run/review/r7-348151ae/review.md'), false, 'S1-1')
+check('新 selfcheck 路径：run/review/selfcheck/input.md 是自输出', isReviewSelfOutput('run/review/selfcheck/input.md'), true, '结构')
+check('run/ 顶层任务目录（非 review 前缀）不是自输出', isArtifactPath('run/step4a/conclusion.md'), true, '结构')
+
+// ---------- 7. 任务名/结论提取 + 索引 ----------
+check('从产物路径提取任务名', extractTaskName(['/data/home/hanwu/UnivEdge/run/step4a/conclusion.md']), 'step4a', '索引')
+check('取最后匹配（当前活动任务）', extractTaskName(['/data/home/hanwu/UnivEdge/run/step4a/x.md', '/data/home/hanwu/UnivEdge/run/l4-task1/y.md']), 'l4-task1', '索引')
+check('review 前缀不算任务名', extractTaskName(['/data/home/hanwu/UnivEdge/run/review/9e496951/review.md']), undefined, '索引')
+check('无产物路径 → 无任务名', extractTaskName([]), undefined, '索引')
+check('结论提取（需修订）', extractConclusion('## 结论：需修订\nS0 问题……'), '需修订', '索引')
+check('结论提取（通过）', extractConclusion('## 结论：通过\n无 S0'), '通过', '索引')
+check('结论提取（未知）', extractConclusion('无结论字段的报告'), '（未知）', '索引')
+check('索引路径', reviewIndexPath('/home/u/UnivEdge'), '/home/u/UnivEdge/run/review/INDEX.md', '索引')
 
 // ---------- 输出 ----------
 const lines = [

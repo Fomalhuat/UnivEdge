@@ -1,10 +1,14 @@
 /**
  * univedge-reviewer 共享逻辑（单一事实来源——源码与测试共同 import，防常量/逻辑漂移，S1-2 闭合）
- *
- * 审查自输出语义（用户裁定 2026-08-31）：
+ */
+import { existsSync, writeFileSync, appendFileSync } from 'node:fs'
+
+/** 审查自输出语义（用户裁定 2026-08-31）：
+ * - run/ 顶层只两类：**review/**（审查系统全部产物）与 **<任务名>/**（任务工作区）；任务名不得前缀 review-
  * - 正式审查报告：run/review/<主8>/<评估者8>/review.md（分目录写盘）
  * - 空报告记录：  run/review/<主8>/empty/<评估者8>.md
- * - 自检产物：    run/review-selfcheck*（selfcheck 输入包/报告属审查流程自输出）
+ * - 自检产物：    run/review/selfcheck/（2026-08-31 起迁入；旧 run/review-selfcheck* 兼容待清理）
+ * - 审查索引：    run/review/INDEX.md（审查管理入口，每次落盘追加记录）
  * - **不排除**（重新进入审查面，S1-1 收窄）：handoff-*.md、r7- 存档目录、其他 run/review/ 下审计文档
  */
 export const REVIEW_DIR = 'run/review'
@@ -20,7 +24,9 @@ export function isReviewSelfOutput(p: string): boolean {
   if (new RegExp(`${REVIEW_DIR}/${HEX8}/review\\.md$`).test(p)) return true
   // 空报告记录：run/review/<主8>/empty/
   if (new RegExp(`${REVIEW_DIR}/${HEX8}/empty/`).test(p)) return true
-  // 自检产物目录（用户裁定）
+  // 审查自检产物：run/review/selfcheck/（2026-08-31 起自检产物迁入 review/ 下）
+  if (p.includes(`${REVIEW_DIR}/selfcheck`)) return true
+  // 旧自检目录（历史兼容，清理后不再命中）
   if (p.includes('run/review-selfcheck')) return true
   return false
 }
@@ -74,4 +80,38 @@ export function pickReport(events: any[]): string {
     if (txt.length > best.length) best = txt
   }
   return best
+}
+
+/** 从报告文本提取结论（通过/需修订/不通过；找不到标未知）。 */
+export function extractConclusion(report: string): string {
+  const m = report.match(/结论[:：]\s*(通过|需修订|不通过)/)
+  return m ? m[1] : '（未知）'
+}
+
+/** 从产物路径提取任务名（run/<任务名>/ 前缀；取最后匹配=当前活动任务；review 前缀不算任务名）。 */
+export function extractTaskName(paths: string[]): string | undefined {
+  let task: string | undefined
+  for (const p of paths) {
+    const m = p.match(/\brun\/([^/]+)\//i)
+    if (m && !m[1].startsWith('review')) task = m[1]
+  }
+  return task
+}
+
+/** 审查索引路径：run/review/INDEX.md（管理入口，按时间/任务/结论检索）。 */
+export function reviewIndexPath(root: string): string {
+  return `${root}/${REVIEW_DIR}/INDEX.md`
+}
+
+/** 追加审查索引记录（时间/主会话/评估者/结论/关联任务/报告路径）。 */
+export function appendReviewIndex(root: string, rec: { mainId: string; childId: string; conclusion: string; task?: string; reportPath: string }): void {
+  try {
+    const file = reviewIndexPath(root)
+    const line = `| ${new Date().toISOString().slice(0, 19)} | ${String(rec.mainId).replace(/^session-/, '').slice(0, 8)} | ${String(rec.childId).replace(/^session-/, '').slice(0, 8)} | ${rec.conclusion} | ${rec.task ?? '—'} | ${rec.reportPath} |`
+    if (existsSync(file)) {
+      appendFileSync(file, line + '\n', 'utf8')
+    } else {
+      writeFileSync(file, `# 审查索引（管理入口）\n\n> 每次审查落盘自动追加；按时间/任务/结论检索；原始报告在 run/review/<主会话>/<评估者>/review.md。\n\n| 时间 | 主会话 | 评估者 | 结论 | 关联任务 | 报告路径 |\n|---|---|---|---|---|---|\n${line}\n`, 'utf8')
+    }
+  } catch { /* ignore */ }
 }
