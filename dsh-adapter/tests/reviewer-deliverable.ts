@@ -13,7 +13,8 @@
  *    冷却期（P0-A）、hash 去重（P0-B）
  *  - 显式审查点（2026-08-31 framework-redesign 方向 1）：@review 声明提取（文本级）+ 事件级扫描
  */
-import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport, isReviewSelfOutput, extractTaskName, extractConclusion, reviewIndexPath } from '../reviewer-shared'
+import { extractReviewInput, fingerprint, persistReport } from '../univedge-reviewer'
+import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport, isReviewSelfOutput, extractTaskName, extractConclusion, reviewIndexPath, extractReviewDeclarations } from '../reviewer-shared'
 
 let pass = 0
 let fail = 0
@@ -98,6 +99,7 @@ check('索引路径', reviewIndexPath('/home/u/UnivEdge'), '/home/u/UnivEdge/run
 // ---------- 8. appendReviewIndex 行为（S2-4：创建/追加/表头/并发首写） ----------
 import { appendReviewIndex } from '../reviewer-shared'
 import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 {
@@ -191,6 +193,135 @@ import { extractReviewDeclarations, scanTurnDeclarations } from '../reviewer-sha
   check('声明扫描：窗口 [5,6] 只取 turn 内声明', scanTurnDeclarations(evs, 5, 6), ['run/t1/a.md', 'run/t1/b.md'], 'declare-scan')
   check('声明扫描：窗口 [0,9] 全量', scanTurnDeclarations(evs, 0, 9), ['run/t1/a.md', 'run/t1/b.md', 'run/t2/c.md'], 'declare-scan')
   check('声明扫描：无事件 → 空', scanTurnDeclarations([], 0, 9), [], 'declare-scan')
+}
+
+// ---------- 输入包组包：触发轮窗口过滤（R7 第二轮 S1-5） ----------
+// 缺陷：tool/call 分支原不按触发轮过滤 → 长会话里输入包塞满早前任务的文件，
+// 评估者"审错文件却声称已审"（B4 型验证失效）。以下用**真实存在**的路径构造，避免被 existsSync 过滤成空集。
+{
+  const repoRoot = new URL('../../', import.meta.url).pathname.replace(/\/$/, '')
+  const mine = `${repoRoot}/dsh-adapter/tests/l1-seat.ts`        // 本次交付（存在）
+  const stale1 = `${repoRoot}/run/review/handoff-bc.md`          // 早前任务文件（存在）
+  const stale2 = `${repoRoot}/run/review/handoff-reviewer-storm-cost.md` // 早前任务文件（存在）
+  const mk = (seq: number, type: string, data: any) => ({ seq, type, data })
+  const evs = [
+    mk(1, 'user/message', { content: [{ type: 'text', text: '任务' }] }),
+    mk(4, 'tool/call', { name: 'read', arguments: JSON.stringify({ file_path: stale1 }) }),
+    mk(5, 'tool/call', { name: 'read', arguments: JSON.stringify({ file_path: stale2 }) }),
+    mk(20, 'tool/call', { name: 'write', arguments: JSON.stringify({ file_path: mine }) }),
+    mk(21, 'assistant/message', { message: { content: [{ type: 'text', text: '已写入 dsh-adapter/tests/l1-seat.ts' }] } }),
+  ]
+  const session = { header: { cwd: repoRoot }, events: evs }
+  const withDecl = extractReviewInput(session, 20, 21, [mine])
+  check('输入包：有声明路径时收入本轮交付', withDecl.artifacts.includes(mine), true, 'S1-5')
+  check('输入包：不再塞入早前轮的旧任务文件（handoff-bc）', withDecl.artifacts.includes(stale1), false, 'S1-5')
+  check('输入包：不再塞入早前轮的审查风暴文件', withDecl.artifacts.includes(stale2), false, 'S1-5')
+  const noDecl = extractReviewInput(session, 20, 21, [])
+  check('输入包：无声明路径时保留兜底（含早前轮文件，不把输入包清空）', noDecl.artifacts.length > 0, true, 'S1-5')
+}
+
+// ---------- 输入包：结构化参数提取的正向断言（R7 第四轮 S1-9） ----------
+// 原 4 条断言只锁"窗口过滤"：`mine` 走 declaredPaths、`.ts` 又不在结构化白名单内，
+// 故把 parsedArgs 整段删掉仍会全绿（“测过≠测对”）。此处补一条**只能由结构化提取产生**的断言。
+{
+  const repoRoot = new URL('../../', import.meta.url).pathname.replace(/\/$/, '')
+  const target = `${repoRoot}/run/review/INDEX.md`   // .md、存在、未声明、仅由 file_path 结构化字段给出
+  const mk = (seq: number, type: string, data: any) => ({ seq, type, data })
+  const evs = [
+    mk(1, 'user/message', { content: [{ type: 'text', text: '任务' }] }),
+    mk(30, 'tool/call', { name: 'read', arguments: JSON.stringify({ file_path: target }) }),
+    mk(31, 'assistant/message', { message: { content: [{ type: 'text', text: '完成' }] } }),
+  ]
+  const r = extractReviewInput({ header: { cwd: repoRoot }, events: evs }, 30, 31, [])
+  check('输入包：窗口内未声明、仅经 file_path 给出的 .md 必须入列（锁结构化提取）', r.artifacts.includes(target), true, 'S1-9')
+  check('输入包：为该产物记录指纹（size/mtime/sha256）', typeof r.fingerprints[target], 'string', 'S0-1')
+}
+
+// ---------- 产物指纹与漂移检出（R7 第四轮 S0-1） ----------
+{
+  const dir = mkdtempSync(join(tmpdir(), 'fp-'))
+  const f = join(dir, 'a.md')
+  writeFileSync(f, 'v1')
+  const fp1 = fingerprint(f)
+  writeFileSync(f, 'v2-changed')
+  const fp2 = fingerprint(f)
+  check('指纹：文件内容变化即检出（组包后改写可被判为漂移）', fp1 !== fp2 && typeof fp1 === 'string', true, 'S0-1')
+  check('指纹：不存在文件返回 undefined（不抛错）', fingerprint(join(dir, 'nope.md')), undefined, 'S0-1')
+  rmSync(dir, { recursive: true, force: true })
+}
+
+// ---------- 声明通道端到端（R7 第五轮 S0-1/S0-2/S0-3：修复件须以构造性反例自检） ----------
+{
+  const repoRoot = new URL('../../', import.meta.url).pathname.replace(/\/$/, '')
+  // (a) 12 项**散文**声明（含 .ts/.py，旧实现白名单不含源码扩展名 + 200 字符截断 → 只出 2 条）
+  const items = [
+    `${repoRoot}/METHODOLOGY.md`, `${repoRoot}/dsh-adapter/README.md`, `${repoRoot}/dsh-adapter/analyze_session.py`,
+    `${repoRoot}/dsh-adapter/univedge-l1-inject.ts`, `${repoRoot}/dsh-adapter/univedge-reviewer.ts`,
+    `${repoRoot}/dsh-adapter/tests/l1-seat.ts`, `${repoRoot}/dsh-adapter/tests/l1-invariants.ts`,
+    `${repoRoot}/dsh-adapter/tests/reviewer-deliverable.ts`,
+    `${repoRoot}/dsh-adapter/test-results/2026-10-10-l1-seat.md`,
+    `${repoRoot}/dsh-adapter/test-results/2026-10-10-l1-invariants.md`,
+    `${repoRoot}/dsh-adapter/test-results/2026-10-10-reviewer-deliverable.md`,
+    `${repoRoot}/knowledge/review-lessons.md`,
+  ]
+  const prose = `本轮交付如下，请审查：\n\n@review ${items.join('\n')}\n\n以上。`
+  check('声明解析：12 项散文清单（含 .ts/.py）全部解析', extractReviewDeclarations(prose).length, 12, 'S0-1')
+  check('声明解析：不再受 200 字符截断', extractReviewDeclarations(prose).includes(items[11]), true, 'S0-1')
+  // R7 第七轮 S0-1/S0-2 的回归断言：确定性 + 引述不构成声明
+  const quoteCase = `见 \`@review ${repoRoot}/dsh-adapter/README.md\` 的说明（引述，不是声明）`
+  check('声明解析：引述真路径（代码跨度内）不构成声明', extractReviewDeclarations(quoteCase).length, 0, 'S0-2')
+  const stab = [extractReviewDeclarations(quoteCase).length, extractReviewDeclarations(quoteCase).length,
+                extractReviewDeclarations(quoteCase).length, extractReviewDeclarations(quoteCase).length]
+  check('声明解析：同输入连续调用结果稳定（无 g 标志状态污染）', stab, [0, 0, 0, 0], 'S0-1')
+  const declCase = `@review ${repoRoot}/dsh-adapter/README.md`
+  check('声明解析：裸写声明稳定命中（4 次一致）',
+    [1, 2, 3, 4].map(() => extractReviewDeclarations(declCase).length), [1, 1, 1, 1], 'S0-1')
+  check('声明解析：纯讨论（无路径）不构成声明', extractReviewDeclarations('我们讨论了 `@review <路径>` 的语义与上限').length, 0, 'S0-1')
+  check('声明解析：讨论里引述真实路径但无 @review → 不构成声明', extractReviewDeclarations(`审查报告已写入 ${repoRoot}/run/review/INDEX.md`).length, 0, 'S0-1')
+  check('声明解析：通配符不是路径', extractReviewDeclarations('@review test-results/*.md').length, 0, 'S0-1')
+
+  // (b) 子代理回执来源的 @review 不触发（否则评估者报告引述 @review → 无界放大）
+  const evs = [
+    { seq: 1, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: '任务' }] } },
+    { seq: 2, type: 'user/message', data: { source: { kind: 'subagent-report' }, content: [{ type: 'text', text: `@review ${repoRoot}/dsh-adapter/README.md` }] } },
+    { seq: 3, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: `@review ${repoRoot}/METHODOLOGY.md` }] } } },
+  ]
+  check('声明扫描：子代理回执内的 @review 被排除、assistant 声明保留', scanTurnDeclarations(evs, 0, 9), [`${repoRoot}/METHODOLOGY.md`], 'S0-1')
+
+  // (c) 声明路径不截断（原 slice(0,12) 静默丢第 13 项）
+  const thirteen = items.concat([`${repoRoot}/AGENTS.md`])
+  const r13 = extractReviewInput({ header: { cwd: repoRoot }, events: [] }, 0, 9, thirteen)
+  check('组包：13 项声明路径全部入列（不截断）', r13.artifacts.length, 13, 'S0-2')
+  check('组包：未入列候选显式报告（此处为空）', r13.dropped.length, 0, 'S0-2')
+
+  // R7 第七轮 S1-4：无声明（auto 通道）时按**最近写入**取，不再被早前任务文件占满
+  const evs3 = [
+    { seq: 10, type: 'tool/call', data: { name: 'write', arguments: JSON.stringify({ file_path: `${repoRoot}/AGENTS.md` }) } },
+    { seq: 900, type: 'tool/call', data: { name: 'write', arguments: JSON.stringify({ file_path: `${repoRoot}/dsh-adapter/README.md` }) } },
+  ]
+  const ra = extractReviewInput({ header: { cwd: repoRoot }, events: evs3 }, 800, 950, [])
+  check('组包（auto 通道）：最近写入的产物排在前面并入列', ra.artifacts[0], `${repoRoot}/dsh-adapter/README.md`, 'S1-4')
+
+  // (d) 任务描述按触发轮窗口取（原取会话首条 = L1 注入全文）
+  const evs2 = [
+    { seq: 1, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: '（会话首条：L1 方法论注入全文……）' }] } },
+    { seq: 50, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: '本轮任务：修 L1 座位' }] } },
+  ]
+  const rw = extractReviewInput({ header: { cwd: repoRoot }, events: evs2 }, 40, 60, [])
+  check('组包：任务描述取自触发轮（非会话首条 L1 文本）', rw.task.startsWith('本轮任务'), true, 'S0-3')
+  check('组包：任务描述来源标注为 trigger-turn', rw.taskSource, 'trigger-turn', 'S0-3')
+
+  // (e) 漂移标注：组包后产物被改写 → 报告正文前出现机制检出标注
+  const tmpRoot = mkdtempSync(join(tmpdir(), 'drift-'))
+  const dfile = join(tmpRoot, 'deliverable.md')
+  writeFileSync(dfile, 'v1')
+  const fps = { [dfile]: fingerprint(dfile)! }
+  writeFileSync(dfile, 'v2-被改写')
+  persistReport(tmpRoot, { id: 'session-aaaa1111-0000-0000-0000-000000000000' }, 'session-bbbb2222-0000-0000-0000-000000000000', '报告正文', 'task', 1, 'declared', fps)
+  const written = readFileSync(join(tmpRoot, 'run/review/aaaa1111/bbbb2222/review.md'), 'utf8')
+  check('报告：组包后产物被改写 → 结论标失效（机制判定，2026-10-10 裁决 1 收紧）', written.includes('本轮结论已失效'), true, 'S1-4b')
+  check('报告：状态行显式标注已失效', written.includes('- 状态: **已失效（窗口内产物漂移）**'), true, 'S1-4b')
+  rmSync(tmpRoot, { recursive: true, force: true })
 }
 
 // ---------- 输出 ----------

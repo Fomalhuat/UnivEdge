@@ -15,9 +15,14 @@ UnivEdge × dsh：协议遵守率统计工具（L3-3，度量基础，4.1 验证
 
 指标口径（与 UnivEdge 加载协议 L0-L2 + VERIFICATION 检查项对齐）：
   - L0 入口加载：user/message 里出现 AGENTS.md 内容（agent-instructions 注入）
-  - L1 注入：2026-10-10 起 L1 常驻**系统提示 section**（每次请求重新组装，不落盘 → 会话日志中不可见），
-    改由插件诊断日志 /tmp/univedge-l1.log 的注册行判定（路径可用 UNIVEDGE_L1_LOG 覆盖）；兼容 2026-10-10 前的旧会话
-    （user/message 里带"UnivEdge 方法论 L1 层"标记）
+  - L1 注入（三源取或）：
+      ① **最强证据——系统提示记录**：`request/header` 事件的 `data.header.system` 含 L1 标题
+         （2026-10-10 换座位后为"## UnivEdge 方法论 L1 层（常驻规范…"；此前为"以下是你必须遵循…"）；
+         注意：L1 在系统提示中的呈现依赖该事件类型被记录，落盘性判定须枚举事件类型，勿用特征串 0 命中外推）
+      ② 旧版会话日志注入：user/message 里带"UnivEdge 方法论 L1 层"标记（2026-10-10 前的机制）；
+         仅在 ① 未命中新标题时启用（否则会把"引用 L1 的消息"误判为注入——R7 第二轮 S1-4）
+      ③ 插件诊断日志 /tmp/univedge-l1.log 的注册行（路径可用 UNIVEDGE_L1_LOG 覆盖）——注册侧留痕，
+         比 ① 更早且不依赖是否发出请求
   - L1 导航：read 工具调用了 knowledge/ 或 METHODOLOGY/VERIFICATION 文件
   - L2 契约：assistant 输出**或产物文件**含"任务契约/完成定义/验证标准/测试计划"
   - L2 自省：assistant 输出**或产物文件**含"启动自省/根因/B1/B2/B3/B4"（B1-B4+P 逐条内省）
@@ -69,8 +74,29 @@ def resolve_path(arg: str | None) -> str:
 
 # ---- 指标提取 ----
 
+L1_NEW_HEADING = '## UnivEdge 方法论 L1 层（常驻规范'
+L1_OLD_HEADING = '以下是你必须遵循的 UnivEdge 方法论 L1 层'
+
+def l1_in_recorded_prompt(events: list[dict]) -> str:
+    """L1 是否在**落盘的系统提示**中（最强证据）。
+
+    `request/header` 事件携带 `data.header.system`（本机实测：当前实例 9/9 该事件均有此字段，
+    长度 6292 → 换座位后 14387，含 L1 段）。
+    返回命中标题类型，未检出返回 ''。
+    """
+    for ev in events:
+        if ev.get('type') != 'request/header':
+            continue
+        system = ((ev.get('data') or {}).get('header') or {}).get('system') or ''
+        if L1_NEW_HEADING in system:
+            return '系统提示记录(常驻 section)'
+        if L1_OLD_HEADING in system:
+            return '系统提示记录(旧历史段)'
+    return ''
+
 def l1_registered_in_diag(session_path: str) -> bool:
-    """L1 座位迁移（2026-10-10）后，L1 常驻系统提示、不落盘 → 以插件诊断日志的注册行判定。
+    """补充判定源：插件诊断日志的注册行（系统提示**已落盘**于 request/header，见 l1_in_recorded_prompt()
+    为首选；本函数补的是"注册时刻/对象"这一 request/header 不记录的信息；2026-10-10 R7 审查修 S1-5）。
 
     日志行格式（univedge-l1-inject.ts 的 diag()）：
         [ISO] l1 section registered session=<session id> workspace=<UnivEdge 根>
@@ -86,7 +112,9 @@ def l1_registered_in_diag(session_path: str) -> bool:
         return False
     name = os.path.basename(os.path.dirname(os.path.abspath(session_path)))
     uuid = name[len('session-'):] if name.startswith('session-') else name
-    return f'session={name}' in diag or (bool(uuid) and uuid in diag)
+    # 精确匹配（R7 S2-4 修）：两种可能的 header.id 形态都覆盖，但都锚定在 `session=` 前缀上，
+    # 不再用裸 uuid 子串——后者在长日志下可能撞上他人注册行。
+    return f'session={name}' in diag or (bool(uuid) and f'session={uuid}' in diag)
 
 def extract(events: list[dict], artifacts_dir: str | None = None, session_path: str = '') -> dict:
     """从事件列表提取指标所需的原始信号。"""
@@ -157,12 +185,16 @@ def extract(events: list[dict], artifacts_dir: str | None = None, session_path: 
     # 指标判定。
     # 口径：L0/L1 看注入侧（user 文本）；L2 契约/自省、锚点看 agent 的实际产出
     # （assistant 输出 + 产物文件——agent 把方法论产物写进文件而非对话文本时不被漏判）。
-    # L1 注入判定：两个来源——旧会话的 user/message 注入标记，或插件诊断日志的注册行。
-    l1_legacy = bool(re.search(r'UnivEdge 方法论 L1 层', all_usr))
+    # L1 注入判定：三源取或——系统提示记录（最强）＞旧版会话日志注入 ＞ 诊断日志注册行。
+    # 修 R7 第二轮 S1-4：legacy 分支**仅在落盘系统提示不含新标题**时启用——否则会把"引用 L1 的普通消息"
+    # （典型：审查派发 prompt 内嵌 L1 全文、或某条报告里引用 L1）误判为"旧版注入"，给出假 ✅。
+    l1_prompt = l1_in_recorded_prompt(events)
+    l1_legacy = (bool(re.search(r'UnivEdge 方法论 L1 层', all_usr))
+                 and not l1_prompt.startswith('系统提示记录(常驻 section)'))
     l1_diag = l1_registered_in_diag(session_path)
     metrics = {
         'L0 入口加载': bool(re.search(r'AGENTS\.md|Instructions from: AGENTS', all_usr)),
-        'L1 注入': l1_legacy or l1_diag,
+        'L1 注入': bool(l1_prompt) or l1_legacy or l1_diag,
         'L1 导航': bool(read_files),
         'L2 契约(产出)': bool(re.search(r'任务契约|contract\.md|完成定义', all_prod)),
         'L2 自省(逐条)': bool(re.search(r'启动自省|基层已加载|逐条内省|B1.*B2.*B3.*B4', all_prod, re.S)),
@@ -178,7 +210,11 @@ def extract(events: list[dict], artifacts_dir: str | None = None, session_path: 
         'assistant_chars': len(all_ast),
         'artifact_files': sorted(artifact_paths),
         'n_events': len(events),
-        'l1_source': ('旧版会话日志注入' if l1_legacy else '') + ('+' if l1_legacy and l1_diag else '') + ('诊断日志(系统提示段)' if l1_diag else ''),
+        'l1_source': '+'.join(p for p in (
+            l1_prompt,
+            '旧版会话日志注入' if l1_legacy else '',
+            '诊断日志(注册留痕)' if l1_diag else '',
+        ) if p),
     }
 
 def render(result: dict) -> str:

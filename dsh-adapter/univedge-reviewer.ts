@@ -1,7 +1,8 @@
 import type { Context } from '@deepseek-ai/cordis'
-import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync, statSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { join, dirname } from 'node:path'
-import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport, extractTaskName, extractConclusion, appendReviewIndex, REVIEW_DIR, hasQuietDirective, allArtifactsUnchanged, shouldCooldown, contentHash, scanTurnDeclarations } from './reviewer-shared.ts'
+import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport, extractTaskName, extractConclusion, appendReviewIndex, REVIEW_DIR, hasQuietDirective, hasForceDirective, allArtifactsUnchanged, shouldCooldown, contentHash, scanTurnDeclarations, transcriptOf } from './reviewer-shared.ts'
 
 /** 诊断日志（临时，定位后移除）。 */
 function diag(...args: any[]): void {
@@ -30,10 +31,18 @@ const HOURLY_REVIEW_LIMIT = Number(process.env.UNIVEDGE_REVIEW_LIMIT_PER_HOUR ??
 const COOLDOWN_MIN = Number(process.env.UNIVEDGE_REVIEW_COOLDOWN_MIN ?? 15)
 const COOLDOWN_WINDOW_MS = COOLDOWN_MIN * 60 * 1000
 const MAX_REVIEWS_PER_WINDOW = Number(process.env.UNIVEDGE_REVIEW_MAX_PER_WINDOW ?? 2)
+// P0-A'（2026-10-10 裁决 3）：自动通道最小间隔——实测双通道阈值与"同一任务连续修订"节奏不匹配
+// （15min/2 次 ≈ 每 5 分钟一次，账本见 run/review/handoff-reviewer-overreview.md §2.1 R3）。
+// 收紧为：本轮无 declared（结构性保证）**且**距上次任何成功审查 ≥ AUTO_MIN_GAP_MIN 才启用 auto。
+// 观察期结束后 auto 通道整体退役（METHODOLOGY §1.7），此参数随之失效。
+const AUTO_MIN_GAP_MIN = Number(process.env.UNIVEDGE_REVIEW_AUTO_GAP_MIN ?? 30)
 // P0-B hash 去重：path -> 最近一次被审时的内容 hash（内容未变则不重审）
 const reviewedHashes = new Map<string, string>()
 // P0-A 冷却期状态：sessionId -> 成功审查时间戳（升序，只留窗口内）
 const successTimes = new Map<string, number[]>()
+// 裁决 2（2026-10-10）：最近一次成功审查的目标（声明清单 + 各产物指纹）——
+// 供 declared 通道"同清单 + 同指纹 → 复用上轮结论"判定；`--force-review` 可强制重审。
+const lastReview = new Map<string, { paths: string[]; fingerprints: Record<string, string>; childId: string; at: number }>()
 
 let consecutiveFailures = 0
 let circuitOpenUntil = 0
@@ -103,16 +112,39 @@ function findUnivEdgeRoot(start: string | undefined): string | undefined {
 /** 提取审查输入包：任务描述 + 最终回复（窗口化——L2-5）+ 产物路径（含读取时刻——完善项 2/3a）。
  * P1 声明通道：declaredPaths 优先并入 artifacts（主 agent @review 声明的路径是权威审查对象），
  * 原有 tool/call 正则提取作为补充（观察期自动通道产物仍要可见）。 */
-function extractReviewInput(session: any, startSeq = 0, endSeq = Number.MAX_SAFE_INTEGER, declaredPaths: string[] = []): { task: string; finalReply: string; artifacts: string[]; snapshotAt: string } {
+/**
+ * 产物指纹（R7 第四轮 S0-1）：`size / mtime / sha256 前 12 位`。
+ * 存在理由：审查期间工作树会被并发改写（本轮四份报告都靠人工 stat 才发现），
+ * 评估者对"已不存在的状态"出结论且**不报错**——属 B4 型验证失效。
+ * 组包时留档 + 报告落盘前复检，把"窗口内漂移"变成报告里的显式标注。
+ */
+export function fingerprint(path: string): string | undefined {
+  try {
+    const st = statSync(path)
+    const digest = createHash('sha256').update(readFileSync(path)).digest('hex').slice(0, 12)
+    return `${st.size}B/${new Date(st.mtimeMs).toISOString()}/${digest}`
+  } catch {
+    return undefined
+  }
+}
+
+export function extractReviewInput(session: any, startSeq = 0, endSeq = Number.MAX_SAFE_INTEGER, declaredPaths: string[] = []): { task: string; taskSource: string; finalReply: string; artifacts: string[]; dropped: string[]; fingerprints: Record<string, string>; snapshotAt: string } {
   let task = ''
+  let taskInWindow = ''
   let finalReply = ''
   const artifacts = new Set<string>(declaredPaths)
+  const candidateSeq = new Map<string, number>()   // path → 最近一次出现的 seq（用于"取最近写入"兜底）
   const cwd = session?.header?.cwd ?? ''
   const evts = session?.events ?? []
   for (const ev of evts) {
     if (ev.type === 'user/message') {
       const content = ev.data?.content ?? []
       const txt = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('')
+      // R7 第五轮 S0-3：**按触发轮窗口取任务描述**——原实现取会话首条 user/message，
+      // 那往往是 L1 注入全文（实测：输入包"任务描述"就是 2026-08-29 的 L1 方法论文本），
+      // 与本次审查对象无关。窗口内取不到时回落到首条（并标注来源）。
+      const inWindow = typeof ev.seq === 'number' && ev.seq >= startSeq && ev.seq <= endSeq
+      if (inWindow && !taskInWindow && txt.trim()) taskInWindow = txt.trim().slice(0, 4000)
       if (!task && txt.trim()) task = txt.trim().slice(0, 4000)
     } else if (ev.type === 'assistant/message' && typeof ev.seq === 'number' && ev.seq >= startSeq && ev.seq <= endSeq) {
       // 只取触发轮区间内的回复（多轮任务中不取旧轮内容）
@@ -121,18 +153,71 @@ function extractReviewInput(session: any, startSeq = 0, endSeq = Number.MAX_SAFE
       const txt = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('')
       if (txt.trim()) finalReply = txt.trim().slice(0, 6000)
     } else if (ev.type === 'tool/call') {
+      // 修 R7 第二轮 S1-5：本分支原先**不按触发轮窗口过滤**，把整个会话历次工具调用涉及的路径
+      // 都收进输入包，再被 slice(0,12) 截断 → 长会话里输入包全是早前任务的文件，
+      // 评估者会"审错文件却声称已审"（B4 型验证失效，且不报错）。
+      const seq = typeof ev.seq === 'number' ? ev.seq : -1
+      if (seq < startSeq || seq > endSeq) {
+        // 触发轮之外：仅在**无任何声明路径**时才作为兜底（保持旧行为不至于让输入包为空）
+        if (declaredPaths.length > 0) continue
+      }
       const data = ev.data ?? {}
+      // 修 S1-5 深层原因：结构化参数（file_path 等）优先提取。
+      // 原实现只对 JSON.stringify 结果做正则，而路径在 JSON 串里紧跟转义引号，
+      // 匹配结果带尾随反斜杠 → 后缀判据失配，等于结构化参数全被漏掉。
+      let parsedArgs: any
+      const rawArgs = (data as any).arguments
+      if (typeof rawArgs === 'string') { try { parsedArgs = JSON.parse(rawArgs) } catch { parsedArgs = undefined } }
+      else if (rawArgs !== undefined) { parsedArgs = rawArgs }
+      if (parsedArgs && typeof parsedArgs === 'object') {
+        for (const key of ['file_path', 'path', 'notebook_path', 'target_file', 'output_path']) {
+          const v = (parsedArgs as any)[key]
+          if (typeof v === 'string' && v.startsWith(cwd) && !/node_modules/.test(v)
+            && /\.(md|txt|json|yaml|yml|log|csv)$/i.test(v)) {
+            artifacts.add(v)
+            candidateSeq.set(v, Math.max(candidateSeq.get(v) ?? -1, seq))
+          }
+        }
+      }
       const s = JSON.stringify(data)
       // 提取 workspace 下的产物路径（run/ 目录或 cwd 下的相对/绝对路径）
       const re = new RegExp(`${cwd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^\\s"']{3,200}`, 'g')
       for (const m of s.match(re) ?? []) {
-        if (/\.(md|txt|json|yaml|yml|log|csv)$/i.test(m) && !/node_modules/.test(m)) artifacts.add(m)
+        if (/\.(md|txt|json|yaml|yml|log|csv)$/i.test(m) && !/node_modules/.test(m)) {
+          artifacts.add(m)
+          candidateSeq.set(m, Math.max(candidateSeq.get(m) ?? -1, seq))
+        }
       }
     }
   }
   // 完善项 3a：过滤已删除/改名的陈旧路径（如 r7-9546ca98 已改名 r7-348151ae，不再存在）
   const existing = [...artifacts].filter((p) => existsSync(p))
-  return { task, finalReply, artifacts: existing.slice(0, 12), snapshotAt: new Date().toISOString() }
+  // R7 第五轮 S0-2：**声明路径不截断**（原实现 `slice(0,12)` 会静默丢弃第 13 项起的声明路径）；
+  // 仅对"推断出的"额外路径设上限，并在返回值里报告未入列者（宁审勿漏 + 显式化）。
+  const declaredSet = new Set(declaredPaths)
+  const declaredPresent = existing.filter((p) => declaredSet.has(p))
+  let inferred = existing.filter((p) => !declaredSet.has(p))
+  // R7 第七轮 S1-4：无声明（auto 通道）时**按最近写入排序**——原实现按发现顺序，长会话里前 12 项
+  // 全是早前任务的旧文件，本次真正交付物反而落到 dropped（且因此没有指纹 → 漂移复检对它失效）。
+  if (declaredPaths.length === 0) {
+    inferred = [...inferred].sort((a, b) => (candidateSeq.get(b) ?? -1) - (candidateSeq.get(a) ?? -1))
+  }
+  const room = Math.max(0, 12 - declaredPresent.length)
+  const picked = [...declaredPresent, ...inferred.slice(0, room)]
+  const dropped = [
+    ...declaredPaths.filter((p) => !existsSync(p)).map((p) => `${p}（声明了但文件不存在）`),
+    ...inferred.slice(room).map((p) => `${p}（超出 12 项上限，未入列）`),
+  ]
+  const fingerprints: Record<string, string> = {}
+  for (const p of picked) {
+    const f = fingerprint(p)
+    if (f !== undefined) fingerprints[p] = f
+  }
+  return {
+    task: taskInWindow || task,
+    taskSource: taskInWindow ? 'trigger-turn' : (task ? 'session-first' : 'none'),
+    finalReply, artifacts: picked, dropped, fingerprints, snapshotAt: new Date().toISOString(),
+  }
 }
 
 /** 触发判据：本 turn 内是否有"实质交付物"（写了产物文件 OR 文本明确指向产物文件）。
@@ -181,12 +266,49 @@ function turnHasQuietDirective(session: any, startSeq: number, endSeq: number): 
   for (const ev of session?.events ?? []) {
     if (typeof ev.seq !== 'number' || ev.seq < startSeq || ev.seq > endSeq) continue
     if (ev.type !== 'user/message' && ev.type !== 'assistant/message') continue
+    // R7 第五轮 S2-3：排除子代理回执来源——评估者报告逐字引述 quiet 字面量时不应对主会话生效
+    const kind = ev.data?.source?.kind
+    if (ev.type === 'user/message' && (kind === 'subagent-report' || kind === 'subagent-settled')) continue
     const msg = ev.data?.message ?? ev.data
     const content = msg?.content ?? []
     const txt = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('')
     if (hasQuietDirective(txt)) return true
   }
   return false
+}
+
+/** 裁决 2（2026-10-10）：本 turn 是否含强制重审指令（--force-review / review:force）。
+ *  与 turnHasQuietDirective 同构（同样的子代理回执排除规则——评估者报告引述该字面量不应生效）。 */
+function turnHasForceDirective(session: any, startSeq: number, endSeq: number): boolean {
+  for (const ev of session?.events ?? []) {
+    if (typeof ev.seq !== 'number' || ev.seq < startSeq || ev.seq > endSeq) continue
+    if (ev.type !== 'user/message' && ev.type !== 'assistant/message') continue
+    const kind = ev.data?.source?.kind
+    if (ev.type === 'user/message' && (kind === 'subagent-report' || kind === 'subagent-settled')) continue
+    const msg = ev.data?.message ?? ev.data
+    const content = msg?.content ?? []
+    const txt = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('')
+    if (hasForceDirective(txt)) return true
+  }
+  return false
+}
+
+/** 裁决 2（2026-10-10）：本轮声明清单与各产物指纹是否与上轮**完全相同**。
+ *  完全相同 → declared 通道复用上轮结论（写显式索引记录），避免对同一快照重复开审查；
+ *  任一产物缺失/读取失败/指纹变化 → false（宁审勿漏）。 */
+export function sameReviewTarget(
+  paths: string[],
+  prev?: { paths: string[]; fingerprints: Record<string, string> },
+): boolean {
+  if (!prev || !paths.length) return false
+  const a = [...paths].sort().join('\n')
+  const b = [...prev.paths].sort().join('\n')
+  if (a !== b) return false
+  for (const p of paths) {
+    const f = fingerprint(p)
+    if (f === undefined || f !== prev.fingerprints[p]) return false
+  }
+  return true
 }
 
 /** P0-B/P2-A：本 turn 的产物路径（结构化提取 write/edit/str_replace_editor 的路径字段，与 hasDeliverable 信号 A 一致）。
@@ -222,7 +344,7 @@ function turnStartSeq(session: any, turn: number): number {
 }
 
 /** 构造评估者 prompt（怀疑派立场，L2 上下文解耦声明，问题分级）。 */
-function buildReviewerPrompt(root: string, input: { task: string; finalReply: string; artifacts: string[]; snapshotAt: string }): string {
+function buildReviewerPrompt(root: string, input: { task: string; finalReply: string; artifacts: string[]; fingerprints?: Record<string, string>; snapshotAt: string }): string {
   const lines = [
     '你是 UnivEdge 的独立审查评估者（R7，怀疑派）。以下是主 agent 完成物理科研任务后的审查请求。',
     '',
@@ -238,10 +360,28 @@ function buildReviewerPrompt(root: string, input: { task: string; finalReply: st
     `- 主 agent 最终回复：\n${input.finalReply || '（无）'}`,
     '',
     input.artifacts.length
-      ? `- 产物文件（请读取核实）：\n${input.artifacts.map((a) => `  - ${a}`).join('\n')}`
+      ? `- 产物文件（请读取核实；括号内为组包时指纹 size/mtime/sha256前12）：\n${input.artifacts.map((a) => `  - ${a}${input.fingerprints?.[a] ? `  （${input.fingerprints[a]}）` : ''}`).join('\n')}`
       : '- 产物文件：未在日志中识别到明确路径，请自行在工作区 run/ 等目录查找产物',
+    // R7 第五轮 S0-2：入列/未入列**显式化**——静默丢弃会让"审了什么"不可复核
+    input.dropped && input.dropped.length
+      ? `- ⚠ 未入列的候选产物（未被审查）：\n${input.dropped.map((a) => `  - ${a}`).join('\n')}`
+      : '- 未入列的候选产物：无',
+    `- 任务描述来源：${input.taskSource ?? 'unknown'}（trigger-turn = 取自触发轮；session-first = 回落取会话首条，可靠性低）`,
     '',
-    `- **审查基于 ${input.snapshotAt} 的产物状态**（完善项 2：产物可能在审查窗口内被并发改写；若你读取时发现与输入包描述不符，请在报告中标注"疑似审查窗口内被改写"）。`,
+    `- **审查基于 ${input.snapshotAt} 的产物状态**（完善项 2）：组包时已记录每个产物的 (size, mtime, sha256 前 12 位)。**请对每个产物实测指纹并比对**；不一致即说明该文件在你审查期间被改写——此时**以你实测的版本为审查对象**，并在报告结论处显式标注"审查窗口内产物被改写：<文件>"。`,
+    '',
+    // R7 第五轮 S1-5：补 §5.1 要求的输入包要素
+    '【锚点对照（输入包第 ② 要素，请用于核验产物中的数字）】',
+    `- 组包快照时间：${input.snapshotAt}（产物状态以此为准；指纹见上）`,
+    '- 外部锚点通道（可自行复核）：① dsh 会话日志 `$DSH_SESSION_JSONL` 的 `request/header`（记录完整系统提示）与 `assistant/message.usage`（token 计量）；② 插件诊断日志 `/tmp/univedge-*.log`；③ `git log/show`（历史状态重建）',
+    '',
+    '【审查清单（第 ③ 要素）：请逐项给 pass/fail/need_human/n-a】',
+    'RC-01 生成-审查解耦（分级声明）、RC-02 可打分判定、RC-03 分歧日志、RC-04 交叉验证独立性、',
+    'RC-05 测试设计审查（因素枚举/独立性/判据可判定/方法盲区/锚点充分）、RC-06 根因宣布协议、RC-07 意见核验、',
+    'CC-01 约定一致性、NC-04/NC-05 环境与运行链、NC-06 外部锚点对照、§0.4 产物四要素、§1.2 任务契约。',
+    '',
+    '【假设与有效域（第 ④ 要素）】：若本次交付含任务契约（如 `run/*/contract.md`），请读取其中的',
+    '「假设清单 / 有效域 / 误差预算 / 锚点引用」四要素并据此判断产物是否越出有效域；缺失则作为 S1/S2 提出。',
     '',
     '【问题分级（重要，决定哪些需要用户确认；严重度 S 系列，区别于权限门 L 系列与解耦等级——L1-1）】',
     '- **S0 实质问题**（会导致错误结论或违反核心方法论：锚点缺失、手算冒充、约定/量纲错误、验证失效）：必须列出，每条标注【需用户确认】；',
@@ -303,8 +443,21 @@ export function apply(ctx: Context): void {
     // ---- 显式审查点（2026-08-31 framework-redesign 方向 1，双通道并存观察期）----
     // P1 声明通道：turn 内文本含 @review <路径> → 必审（不受冷却/hash 约束——显式声明是意志信号，
     // 与"响应审查的修订"无关；节奏交还主 agent/用户）。观察期后自动通道退役，此通道成为主判据。
+    // 触发判据接线点（R7 第七轮 S0-2）：scanTurnDeclarations → extractReviewDeclarations（行内/行首 + 引述中和）。
+    // 判据 = "存在 @review 且其后至少一个可解析路径"，引述式内联代码跨度不计入。
     const declared = scanTurnDeclarations(session?.events ?? [], startSeq, endSeq)
     if (declared.length > 0) {
+      // 裁决 2（2026-10-10）：**同清单 + 同指纹 → 复用上轮结论**（写显式记录，非静默跳过）。
+      // 依据：账本 §2.1 显示 6 轮中多轮在审"同一快照"；`--force-review` / `review:force` 保留强制重审出口。
+      const prev = lastReview.get(session.id)
+      if (!turnHasForceDirective(session, startSeq, endSeq) && sameReviewTarget(declared, prev)) {
+        const reuseRoot = findUnivEdgeRoot(session.header?.cwd)
+        if (reuseRoot) {
+          diag('turn', turn, `declared target unchanged since ${prev?.childId} → reuse last conclusion (use --force-review to force)`)
+          appendReuseRecord(reuseRoot, session, String(prev?.childId))
+          return
+        }
+      }
       diag('turn', turn, `declared review via @review: ${declared.join(', ')}`)
       countReview(session.id)
       void runReview(ctx, session, turn, startSeq, endSeq, declared)
@@ -315,9 +468,20 @@ export function apply(ctx: Context): void {
       return
     }
     // ---- 审查风暴抑制（2026-08-31；仅约束自动通道——声明通道不受此约束）----
-    // P0-A 冷却期：窗口内成功审查已达上限 → 跳过（延迟不丢弃；主 agent 聚合修订后下次审查读最新状态）
-    if (shouldCooldown(successTimes.get(session.id) ?? [], Date.now(), MAX_REVIEWS_PER_WINDOW, COOLDOWN_WINDOW_MS)) {
-      const recent = (successTimes.get(session.id) ?? []).filter((t) => t >= Date.now() - COOLDOWN_WINDOW_MS).length
+    // 裁决 3（2026-10-10）：**先判最小间隔**——本轮无 declared（已由上面的分支结构性保证）
+    // 且距上次任何成功审查 ≥ AUTO_MIN_GAP_MIN 才启用 auto。实测旧阈值（15min/2 次 ≈ 每 5 分钟一次）
+    // 与"同一任务连续修订"节奏不匹配：两次 auto 相隔仅 4 分 49 秒，第二次触发时窗口内只计到 1 次
+    // 成功（另一轮由 declared 触发）→ 冷却未拦（账本 §2.1 R3）。
+    const successes = successTimes.get(session.id) ?? []
+    const lastSuccessAt = successes.length ? successes[successes.length - 1] : 0
+    if (lastSuccessAt && Date.now() - lastSuccessAt < AUTO_MIN_GAP_MIN * 60 * 1000) {
+      const gapMin = ((Date.now() - lastSuccessAt) / 60000).toFixed(1)
+      diag('turn', turn, `auto gap ${gapMin}min < ${AUTO_MIN_GAP_MIN}min since last review, skip`)
+      return
+    }
+    // P0-A 冷却期（保留为冗余第二道）：窗口内成功审查已达上限 → 跳过（延迟不丢弃；主 agent 聚合修订后下次审查读最新状态）
+    if (shouldCooldown(successes, Date.now(), MAX_REVIEWS_PER_WINDOW, COOLDOWN_WINDOW_MS)) {
+      const recent = successes.filter((t) => t >= Date.now() - COOLDOWN_WINDOW_MS).length
       diag('turn', turn, `cooldown active (${recent}/${MAX_REVIEWS_PER_WINDOW} reviews in ${COOLDOWN_MIN}min), skip review`)
       return
     }
@@ -401,7 +565,7 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
     recordFailure() // ④ 失败计数（熔断用；迟到回收成功时会经 collectLateReport 复位）
     // 缺陷 6：超时中止后迟到 turn/end 的完整报告回收——先查当前会话事件，再挂迟到监听，杜绝静默丢失
     // S1-2（selfcheck 2026-08-31）：透传 turn/channel——迟到回收的报告头须标注真实触发通道，否则观察期 A 指标（declared 占比）被系统性拉低
-    void collectLateReport(ctx, root, session, childId, startSeq, endSeq, turn, channel)
+    void collectLateReport(ctx, root, session, childId, startSeq, endSeq, turn, channel, input.fingerprints)
     return
   }
 
@@ -420,8 +584,20 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
 
   // 写审查报告（缺陷 3：按评估者会话分目录，杜绝后写覆盖先写）
   const task = extractTaskName(input.artifacts) // 从触发轮产物路径提取任务名（可空，仅进索引）
-  persistReport(root, session, childId, report, task, turn, channel)
+  // 裁决 4（2026-10-10）：评估者全文随报告一并归档（review.md 只是单条最长消息）
+  const transcript = transcriptOf(child?.session?.events ?? [])
+  persistReport(root, session, childId, report, task, turn, channel, input.fingerprints, transcript || undefined)
   recordSuccess(session.id) // 报告落盘 = 成功，复位失败计数 + 记录成功时间（P0-A 冷却期用）
+  // 裁决 2（2026-10-10）：记录本轮审查目标（声明清单 + 各产物指纹），供下次 declared 判定
+  // "同清单 + 同指纹 → 复用上轮结论"；auto 通道不记（其对象由嗅探推断，稳定性不足）。
+  if (declaredPaths.length > 0) {
+    lastReview.set(session.id, {
+      paths: [...declaredPaths],
+      fingerprints: input.fingerprints,
+      childId: String(childId),
+      at: Date.now(),
+    })
+  }
   // P0-B：记录被审产物内容 hash（供后续 hash 去重；迟到回收路径不记录，宁审勿漏）
   // 注（selfcheck S1-1）：hash 记录源与 artifactPathsOfTurn 不同源，相对路径产物不入 map——宁审勿漏方向，观察期后随自动通道一并退役
   for (const p of input.artifacts) {
@@ -430,19 +606,51 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
   }
 }
 
+/** 裁决 2（2026-10-10）：复用记录的落盘——不启动新审查，但**显式记录**"复用哪一轮的结论"。
+ *  设计要点：复用 ≠ 静默跳过。INDEX.md 里留一行（通道列标 `declared-reuse`），
+ *  依据（清单与指纹均未变）与来源评估者可查；`--force-review` 可随时推翻。 */
+export function appendReuseRecord(root: string, session: any, prevChildId: string): void {
+  const main8 = String(session.id).replace(/^session-/, '').slice(0, 8)
+  const child8 = String(prevChildId).replace(/^session-/, '').slice(0, 8)
+  appendReviewIndex(root, {
+    mainId: session.id,
+    childId: prevChildId,
+    conclusion: `（复用 ${child8} 的结论：清单与指纹均未变）`,
+    reportPath: `${REVIEW_DIR}/${main8}/${child8}/review.md`,
+    channel: 'declared-reuse',
+  })
+}
+
 /** 写审查报告（缺陷 3：按评估者会话分目录）+ 追加审查索引（INDEX.md，管理入口）。
  * P2-A：报告头标注触发 turn 与触发通道（declared=@review 声明 / auto=自动嗅探；观察期对比用；
  * 迟到回收路径无 turn/通道时记 —/auto）。 */
-function persistReport(root: string, session: any, childId: string, report: string, task?: string, turn?: number, channel = 'auto'): void {
+export function persistReport(root: string, session: any, childId: string, report: string, task?: string, turn?: number, channel = 'auto', fingerprints: Record<string, string> = {}, transcript?: string): void {
+  // R7 第四轮 S0-1 + 裁决 1（2026-10-10）：「漂移即失效」——组包后产物被改写 → 本轮结论**作废**
+  // （原实现只提示"请以当前版本复看"，但结论仍以"通过/需修订"形式留在 INDEX 与报告头，
+  //   下游会据此推进）。审查结论需要稳定锚点：无锚点的"通过"等同未审（评估者四轮均提出）。
+  const drifted = Object.entries(fingerprints).filter(([p, f]) => fingerprint(p) !== f).map(([p]) => p)
+  const invalidated = drifted.length > 0
+  const driftNote = invalidated
+    ? `> ⚠ **本轮结论已失效（机制判定，非评估者判断）**：下列产物在组包后被改写——本报告对应的是**组包时快照**，已非当前版本。\n> 请勿据此推进；待修订稳定后重新宣告审查（或 --force-review 强制重审）。\n${drifted.map((p) => `> - ${p}`).join('\n')}\n\n`
+    : ''
   const dir = reviewOutDir(root, session.id, childId)
   mkdirSync(dir, { recursive: true })
   const file = join(dir, 'review.md')
-  writeFileSync(file, `# 独立审查报告（R7）\n\n- 主会话: ${session.id}\n- 评估者会话: ${childId}\n- 触发 turn: ${turn ?? '—'}\n- 触发通道: ${channel}\n- 生成时间: ${new Date().toISOString()}\n\n---\n\n${report}\n`, 'utf8')
+  writeFileSync(file, `# 独立审查报告（R7）\n\n- 主会话: ${session.id}\n- 评估者会话: ${childId}\n- 触发 turn: ${turn ?? '—'}\n- 触发通道: ${channel}\n- 生成时间: ${new Date().toISOString()}\n${invalidated ? '- 状态: **已失效（窗口内产物漂移）**\n' : ''}\n---\n\n${driftNote}${report}\n`, 'utf8')
   diag('report written:', file)
+  // 裁决 4（2026-10-10）：**完整报告全文落盘**——pickReport 只留"含报告锚的单条最长消息"（实测 review.md
+  // 仅 2–4 KB），而评估者的完整产出（逐项判定、中间核验、长分析）散在会话事件里、需解压 session.jsonl.zstd
+  // 才能读 → 审查历史不可直接复核（B4 型）。此处按 seq 顺序落盘全部 assistant 文本。
+  if (transcript) {
+    const tfile = join(dir, 'transcript.md')
+    writeFileSync(tfile, `# 评估者全文（R7）\n\n- 主会话: ${session.id}\n- 评估者会话: ${childId}\n- 触发 turn: ${turn ?? '—'}\n- 触发通道: ${channel}\n- 生成时间: ${new Date().toISOString()}\n\n---\n\n${transcript}\n`, 'utf8')
+    diag('transcript written:', tfile)
+  }
   appendReviewIndex(root, {
     mainId: session.id,
     childId,
-    conclusion: extractConclusion(report),
+    // 裁决 1（2026-10-10）：漂移 → 索引里的结论也显式标"已失效"，避免下游按旧结论推进
+    conclusion: invalidated ? `${extractConclusion(report)}（⚠已失效：窗口内漂移）` : extractConclusion(report),
     task,
     reportPath: `${REVIEW_DIR}/${String(session.id).replace(/^session-/, '').slice(0, 8)}/${String(childId).replace(/^session-/, '').slice(0, 8)}/review.md`,
     channel, // S2（2026-08-31）：索引记录触发通道——观察期统计 A/B/C 直接读 INDEX.md 一列，免遍历报告头
@@ -469,18 +677,23 @@ function persistEmpty(root: string, session: any, childId: string, startSeq?: nu
 
 /** 缺陷 6：超时中止后回收迟到报告——先查当前会话事件（竞态窗口），再挂迟到监听（限时 5 分钟），
  * 仍无报告则落盘"中止"记录。杜绝"wait failed 后直接 return"导致的迟到完整报告静默丢失。 */
-async function collectLateReport(ctx: Context, root: string, session: any, childId: string | undefined, startSeq?: number, endSeq?: number, turn?: number, channel = 'auto'): Promise<void> {
+async function collectLateReport(ctx: Context, root: string, session: any, childId: string | undefined, startSeq?: number, endSeq?: number, turn?: number, channel = 'auto', fingerprints: Record<string, string> = {}): Promise<void> {
   if (!childId) return
   diag('collectLateReport start, child:', childId)
   const tryPick = (): string => {
     const child = ctx.agents.get(childId as any) as any
     return pickReport(child?.session?.events ?? [])
   }
+  // 裁决 4（2026-10-10）：迟到路径同样归档评估者全文（与主路径一致，避免"只有主路径有全文"）
+  const lateTranscript = (): string | undefined => {
+    const tr = transcriptOf((ctx.agents.get(childId as any) as any)?.session?.events ?? [])
+    return tr || undefined
+  }
   // 1) 竞态窗口：wait failed 瞬间可能已产出（如 turn/end 刚完成但事件未及时送达）
   const immediate = tryPick()
   if (immediate) {
     diag('late report already available, persisting')
-    persistReport(root, session, childId, immediate, undefined, turn, channel)
+    persistReport(root, session, childId, immediate, undefined, turn, channel, fingerprints, lateTranscript())
     return
   }
   // 2) 挂迟到监听（限时 5 分钟）：子代理稍后完成 turn/end 则回收
@@ -498,7 +711,7 @@ async function collectLateReport(ctx: Context, root: string, session: any, child
     const late = tryPick()
     if (late) {
       diag('late report recovered')
-      persistReport(root, session, childId, late, undefined, turn, channel)
+      persistReport(root, session, childId, late, undefined, turn, channel, fingerprints, lateTranscript())
       recordSuccess(session.id) // 迟到回收成功 = 复位失败计数 + 记录成功时间（P0-A）
     } else {
       diag('late turn/end but no report text, persisting empty')

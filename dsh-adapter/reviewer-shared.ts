@@ -152,6 +152,14 @@ export function hasQuietDirective(txt: string): boolean {
   return QUIET_RE.test(txt)
 }
 
+/** 强制重审指令（2026-10-10 裁决 2）：`--force-review` / `review:force`。
+ *  用途：declared 通道下"清单与指纹与上轮完全相同 → 复用上轮结论"（去重复用）时，
+ *  仍保留显式强制重审的出口——与 `--no-review` 对称，把否决权留给用户/主 agent。 */
+export const FORCE_RE = /(?:--force-review|review\s*:\s*force)/i
+export function hasForceDirective(txt: string): boolean {
+  return FORCE_RE.test(txt)
+}
+
 /** 产物内容 SHA-256 hex（P0-B）。读失败返回 undefined——不参与去重判定（宁审勿漏）。 */
 export function contentHash(p: string): string | undefined {
   try {
@@ -185,27 +193,107 @@ export function shouldCooldown(times: number[], now: number, maxPerWindow: numbe
 // 显式声明 = 意志信号，与"响应审查的修订"无关），自动通道继续受冷却/hash 约束。
 // 切换期删除自动通道后：判据 = 声明 + 会话结束兜底。
 
-/** @review 声明（P1 声明通道，framework-redesign 方向 1）：@review 后跟产物路径清单（空格/中文连接词分隔）。
- * 语义 = "审查这些产物"——尾部扫描（@review 之后 200 字符内）提取所有产物路径，过滤审查自输出，去重保序。
- * 约定：@review 后必须跟至少一个路径（无路径声明不支持——写不出"审什么"就无意义）。
- * 设计取舍：单路径逐一声明更严格但违背自然表达（"@review a 与 b"是主 agent 的常见写法）；
- * 尾部扫描多路径代价极小且语义明确（@review 后的路径清单意图清晰），比自动嗅探的完成态动词可靠一个量级。 */
+/** @review 声明（P1 声明通道，framework-redesign 方向 1）。
+ *
+ * 语义（METHODOLOGY §1.7:226）："`@review <路径>`，可列多路径清单，**审查其后全部路径**"。
+ * 实现要点（2026-10-10 R7 第五轮 S0-1 修复）：
+ *  - **取消 200 字符截断**：原实现只取 @review 后 200 字符，实测 12 项交付清单（748 字符）只解析出 2 条；
+ *  - 声明段 = 从 @review 到**空行**（段落边界），逐行提取，不在段内的讨论文字自然出局；
+ *  - 路径白名单补 `.ts/.tsx/.js/.py/.sh/.tex/.toml`（原白名单只有 md/json/…，源码路径全被漏掉）；
+ *  - 剥离内联代码跨度里**纯讨论**的写法（如 `@review <路径>`："@" 出现在反引号内且该跨度无可解析路径 → 整段忽略）；
+ *  - 过滤审查自输出与通配符（`test-results/*.md` 不是路径）。
+ */
 export const REVIEW_DECLARE_RE = /@review\b/gi
 
-/** 从文本提取 @review 声明的产物路径（尾部扫描多路径；过滤审查自输出；无声明/无路径返回空数组；去重保序）。 */
+const PATH_EXT = 'md|markdown|json|jsonl|txt|csv|yaml|yml|log|dat|ts|tsx|js|mjs|py|sh|tex|toml'
+/** 路径 token 的**源串**（注意：一律现用现建 `new RegExp(..., 'gi')`，绝不在模块级持有带 `g` 的正则
+ *  并用 `.test()` —— 那次 `lastIndex` 跨调用残留导致同一输入连续调用结果翻转，
+ *  属 2026-10-10 引入的真实回归，R7 第七轮 S0-1 已构造性复现）。 */
+const PATH_TOKEN_SRC = `[\\w./\\-]+\\.(?:${PATH_EXT})\\b`
+
+/** 行首的声明头（仅用于判定"是否需要把后续行纳入同一声明块"）。 */
+const DECL_LINE_RE = /^[ \t>*\-]*@review\b/i
+
+/** 取一行的路径 token（每次新建正则，无状态）。 */
+function pathsInLine(line: string): string[] {
+  const cleaned = line.replace(/[`"']/g, '')
+  return cleaned.match(new RegExp(PATH_TOKEN_SRC, 'gi')) ?? []
+}
+
+/** `@review` 之后的剩余文字是否**只由路径与连接词构成**（= 纯声明）。
+ *  规则：去掉路径 token 后，剩下的只能是空白/中英文连接词/标点；出现其他散文词 → 视为"讨论/引述"而非声明。
+ *  这修掉 R7 第七轮 S0-2 的残留：不带反引号的"讨论 + 真路径"（如 `我们在讨论 @review a.md 的语义`）不再触发。 */
+const SEPARATOR_ONLY_RE = /^[\s、，,。；;：:与和及或\-\*>·（）()【】\[\]"'`]*$/
+/** 括号注释开头（`@review a.md（本轮交付）` 这类带简注的声明仍算声明）。 */
+const COMMENT_TAIL_RE = /^\s*[（(【\[「『—–-]/
+function isPureDeclarationTail(tail: string): boolean {
+  const withoutPaths = tail
+    .replace(new RegExp(PATH_TOKEN_SRC, 'gi'), '')
+    .replace(new RegExp(REVIEW_DECLARE_RE.source, 'gi'), '')   // 同一行的后续 @review 不算散文
+  // 纯路径清单（只剩分隔符）→ 声明；以括号/破折号开头的简注 → 仍视为声明（如"（本轮交付）"）；
+  // 其余（出现散文词，如"的语义""这个案例"）→ 判为讨论/引述，不触发。
+  return SEPARATOR_ONLY_RE.test(withoutPaths) || COMMENT_TAIL_RE.test(withoutPaths)
+}
+
+/** 中和"引述式"内联代码跨度：跨度内含 `@review` → 整段视为引述（无论是否含路径），替换为空格。
+ *  这样 ``见 `@review x.md` 的说明`` 不再是声明；而裸写 `@review x.md` 仍是声明。 */
+function neutralizeQuotedMentions(txt: string): string {
+  return txt.replace(/`[^`]*`/g, (span) => (/@review\b/i.test(span) ? ' '.repeat(span.length) : span))
+}
+
+/**
+ * 提取 `@review` 声明的产物路径（P1 声明通道）。
+ *
+ * 语义（METHODOLOGY §1.7:226："`@review <路径>`，可列多路径清单，**审查其后全部路径**"）：
+ *  - **无 200 字符截断**（原实现只取其后 200 字符 → 12 项清单只解析出 2 条）；
+ *  - 一条声明 = 从 `@review` 到**行尾**；若 `@review` 位于行首，则继续把后续行纳入同一声明块，
+ *    直到空行或下一条 `@review`（支持多行清单）；
+ *  - 路径白名单含源码扩展名（`.ts/.py/…`）——原实现缺此，导致"声明了源码但审查者从未收到"；
+ *  - **引述 ≠ 声明**：内联代码跨度内的 `@review` 一律中和（见 `neutralizeQuotedMentions`）；
+ *  - 过滤审查自输出与含通配符的伪路径。
+ *  - **确定性**：不持有任何带 `g` 的模块级正则做 `.test()`（R7 第七轮 S0-1 的回归根因）。
+ */
 export function extractReviewDeclarations(txt: string): string[] {
   const out: string[] = []
+  const cleaned = neutralizeQuotedMentions(txt)
+  const lines = cleaned.split('\n')
   const re = new RegExp(REVIEW_DECLARE_RE.source, 'gi')
-  const pathRe = /[^\s"',，、]+\.(?:md|json|txt|csv|yaml|yml|log|dat)\b/gi
-  let m: RegExpExecArray | null
-  while ((m = re.exec(txt)) !== null) {
-    const tail = txt.slice(m.index + m[0].length, m.index + m[0].length + 200)
-    const paths = tail.match(pathRe) ?? []
-    for (const p of paths) {
-      if (!isReviewSelfOutput(p)) out.push(p)
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]
+    const local = new RegExp(REVIEW_DECLARE_RE.source, 'gi')
+    let m: RegExpExecArray | null
+    while ((m = local.exec(line)) !== null) {
+      const tail = line.slice(m.index + m[0].length)
+      if (!isPureDeclarationTail(tail)) continue          // 讨论/引述（含散文词）→ 不是声明
+      const block: string[] = [tail]
+      if (DECL_LINE_RE.test(line.trim())) {                 // 行首声明 → 续行并入同一块
+        for (let j = i + 1; j < lines.length; j += 1) {
+          if (lines[j].trim() === '' || DECL_LINE_RE.test(lines[j].trim())) break
+          block.push(lines[j])
+        }
+      }
+      for (const raw of block) {
+        for (const c of pathsInLine(raw)) {
+          if (c.includes('*') || /^https?:/i.test(c)) continue
+          if (isReviewSelfOutput(c)) continue
+          out.push(c)
+        }
+      }
     }
   }
+  void re
   return [...new Set(out)]
+}
+
+/** 触发判据说明（R7 第七轮 S0-2 修复）：生产接线点是 `scanTurnDeclarations()`（由 `univedge-reviewer.ts`
+ *  的触发分支调用），其语义 = 调用 {@link extractReviewDeclarations} 且结果非空。
+ *  此前另有一个零调用点的 `hasReviewDeclaration()` 谓词，已知会误导（文档/知识库把它当成生效判据）→ 已删除。 */
+
+/** 谓词便捷包装（**测试与复现探针用**）：等价于 `extractReviewDeclarations(txt).length > 0`。
+ *  生产触发判据的接线点是 `scanTurnDeclarations()`（见 `univedge-reviewer.ts` 触发分支注释）——
+ *  不要把它写成"生效的触发判据"（R7 第七轮 S0-2 的教训：文档/知识库曾指向未接线的谓词）。 */
+export function hasReviewDeclaration(txt: string): boolean {
+  return extractReviewDeclarations(txt).length > 0
 }
 
 /** 事件级扫描：turn 窗口内 user/assistant 文本中的 @review 声明路径（P1 声明通道）。
@@ -215,10 +303,36 @@ export function scanTurnDeclarations(events: any[], startSeq: number, endSeq: nu
   for (const ev of events) {
     if (typeof ev.seq !== 'number' || ev.seq < startSeq || ev.seq > endSeq) continue
     if (ev.type !== 'user/message' && ev.type !== 'assistant/message') continue
+    // R7 第五轮 S0-1：**排除子代理回执来源**——评估者报告回到主会话时是 `user/message`，
+    // 其 source.kind 为 subagent-report / subagent-settled；报告在审查"@review 机制"时必然引述该词，
+    // 若计入则每轮审查都会触发下一轮（无界放大，且绕过冷却/hash）。
+    const kind = ev.data?.source?.kind
+    if (ev.type === 'user/message' && (kind === 'subagent-report' || kind === 'subagent-settled')) continue
     const msg = ev.data?.message ?? ev.data
     const content = msg?.content ?? []
     const txt = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('')
     out.push(...extractReviewDeclarations(txt))
   }
   return [...new Set(out)]
+}
+
+/** 评估者会话全文（2026-10-10 裁决 4：审查报告全文落盘）。
+ *
+ *  存在理由：`pickReport` 只取"含报告锚的**单条**最长消息"（实测落盘 review.md 仅 2–4 KB），
+ *  而评估者的完整产出（逐项判定、中间核验、被截断的长分析）散在会话事件里——
+ *  单份 141–183 K 字符，需解压 session.jsonl.zstd 才能读 → **审查历史不可直接复核**（B4 型）。
+ *  本函数按 seq 顺序拼接全部 assistant 文本块，供落盘 `transcript.md` 归档。 */
+export function transcriptOf(events: any[]): string {
+  const parts: string[] = []
+  for (const ev of events) {
+    if (ev?.type !== 'assistant/message') continue
+    const content = ev.data?.message?.content ?? []
+    const txt = content
+      .filter((b: any) => b?.type === 'text')
+      .map((b: any) => b?.text ?? '')
+      .join('')
+      .trim()
+    if (txt) parts.push(txt)
+  }
+  return parts.join('\n\n---\n\n')
 }

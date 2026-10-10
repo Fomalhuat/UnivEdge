@@ -20,9 +20,36 @@ export const L1_SECTION_NAME = 'univedge:l1'
 export const L1_SECTION_ORDER = 10
 
 /**
+ * L1 字符预算门（**单一事实来源**：本插件与 `tests/l1-seat.ts` 共用，避免两处漂移）。
+ *
+ * **为什么门放在注入路径上**（R7 第二轮 S0-1）：仓内无 CI、无 git hook，也没有任何东西调用单元测试；
+ * 只在测试里设门，实测语义是"下次有人手动跑测试时才报错"，与该门要防的失效模式同构。
+ * 故门由 {@link render} 在**每次提示组装**求值时检查，越界即写诊断日志告警，不依赖任何人记得跑测试。
+ *
+ * **取值依据（政策选择，不是换算产物）**（R7 第三轮 S0-2）：原值 10,560 = 6000 × 1.76 是
+ * "被判定未标定"的换算比的乘法残余，与"该比值不参与判据"的声明自相矛盾。现改为：
+ *
+ *     L1_CHAR_LIMIT = 10,520  ≈  8,093 × 1.30 = 10,520.9（**向下取整**）  // 政策余量 +30%
+ *
+ * 即门限只由"当前实测字符数 × 政策余量"定义，与任何 token 换算比无关。
+ * 判据用**字符**（可直接测量、无换算歧义）；token 数一律标"未标定估计"，不作判据。
+ * 门限可用 `UNIVEDGE_L1_CHAR_LIMIT` 覆盖（测试与临时调门用）。
+ */
+export const L1_CHAR_LIMIT = 10520
+
+/** 生效的门限：默认 {@link L1_CHAR_LIMIT}，可用 `UNIVEDGE_L1_CHAR_LIMIT` 覆盖。 */
+export function l1CharLimit(): number {
+  const raw = Number(process.env.UNIVEDGE_L1_CHAR_LIMIT)
+  return Number.isFinite(raw) && raw > 0 ? raw : L1_CHAR_LIMIT
+}
+
+/**
  * 诊断日志（与 univedge-reviewer 同惯例：`/tmp/univedge-*.log`）。
- * 存在理由：**系统提示不落盘**（实测：app-boot 的 harness 源码 section 特征串在 session.jsonl.zstd 中 0 命中），
- * 因此"L1 已注册"这一事实在会话日志里不可见，只能由本日志留痕供审计。
+ * 存在理由：留痕**注册侧**事实——何时、为哪个 session/workspace 注册了 section。
+ * 更正（2026-10-10 实测）：系统提示**是落盘的**，位于 `request/header` 事件的 `data.header.system`
+ * （换座位后该字段 14387 字符且含 L1 段；旧机制时期为 6292 字符、不含 L1）。
+ * 故本日志不是 L1 可核性的唯一来源，而是对 request/header 不记录的"注册时刻/注册对象"的补充；
+ * `analyze_session.py` 以 request/header 记录为首选判定源，本日志为次选。
  * 路径可用 `UNIVEDGE_L1_LOG` 覆盖（测试用：避免测试注册污染生产审计日志）。
  */
 function diagPath(): string {
@@ -96,9 +123,28 @@ export function readL1(root: string): string {
  * section 文本求值：每次提示组装时从磁盘重读（保持"与源同步"，与旧版每步注入的行为一致）。
  * 读取失败时降级为可读告警而非抛错——provider 抛错会波及整次组装，等于让方法论层拖垮会话。
  */
+/** 已告警的键集合：**按 `workspace + 尺寸 + 门限` 去重**——同一尺寸只告警一次避免每请求刷屏；
+ * 用集合而非单一变量，避免同进程多 agent / 多 workspace 时互相抑制（R7 第四轮 S2-5）。 */
+const warned = new Set<string>()
+
 function render(root: string): string {
   try {
-    return readL1(root)
+    const text = readL1(root)
+    const limit = l1CharLimit()
+    if (text.length > limit) {
+      const key = `${root}:${text.length}:${limit}`
+      if (!warned.has(key)) {
+        warned.add(key)
+        diag('WARN l1 size over budget', `chars=${text.length}`, `limit=${limit}`,
+          `over=${(100 * (text.length / limit - 1)).toFixed(1)}%`,
+          '→ 显式决定：接受并上调 L1_CHAR_LIMIT / 瘦身（预案见 run/l1-trim/plan.md）')
+      }
+      // R7 第四轮 S2-2：越界只写日志仍属"有人看才起作用"→ 把告警行并入 section 文本，
+      // 使 agent 与用户当轮即见（门因此真正"迫使显式决定"），日志留痕供审计。
+      return `> ⚠ UnivEdge L1 尺寸超预算：${text.length} 字符 > 门限 ${limit}（政策余量 +30%）。`
+        + `请显式决定：上调 L1_CHAR_LIMIT / 瘦身（预案见 run/l1-trim/plan.md）。\n\n${text}`
+    }
+    return text
   } catch (error) {
     return [
       '## UnivEdge 方法论 L1 层加载失败',
