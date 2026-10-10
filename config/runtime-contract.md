@@ -61,7 +61,7 @@
 |---|---|---|
 | R1 | ✓ | bash 工具（沙箱可配，HPC 无沙箱后端时用 `DSH_PERMISSION_MODE=danger-full-access` 降级） |
 | R2 | 部分 | 工具权限由 sandbox 策略控制；UnivEdge 的 L2 副作用门控由 `submit_hpc_job` 工具（CHECK 字段强制）承载 |
-| R3 | ✓ | 原生上下文压缩（compaction-basic）；L1 注入带缺失自动恢复（pre-step） |
+| R3 | ✓ | 原生上下文压缩（compaction-basic）；L1 作为常驻系统提示 section（每请求重新组装 → 对 compaction 免疫，无需恢复路径） |
 | R4 | ✓ | session 持久化（`~/.dsh/sessions/` JSONL.zstd） |
 | R5 | ✓ | 模型路由（agentDefaultModel / provider 选择） |
 | R6 | ✓ | session 事件日志可审计（工具调用/注入/推理全记录） |

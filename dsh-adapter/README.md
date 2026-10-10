@@ -8,23 +8,27 @@
 
 | 文件 | 作用 |
 |---|---|
-| `univedge-l1-inject.ts` | dsh 插件：L1 双时机注入——`session-start` 全量（METHODOLOGY §0+§1 + 基层）+ `pre-step` 缺失时自动补精简版（长会话/compaction 保障） |
+| `univedge-l1-inject.ts` | dsh 插件：L1 常驻注入——`session-start` 在**该会话作用域**注册 system prompt section（`univedge:l1`，order 10），每请求组装时从磁盘重读（METHODOLOGY §0+§1 + 基层）；**不进入对话流**（2026-10-10 起取代旧版"用户消息注入 + 每步补精简版"） |
 | `univedge-hpc-gate.ts` | dsh 插件：注册 `submit_hpc_job` 工具——提交作业前强制 CHECK 字段校验（schema 层 `required` + execute 层非空校验双层门控） |
 | `univedge-reviewer.ts` + `reviewer-shared.ts` | dsh 插件：任务完成后 spawn **独立评估者子 agent**（R7，怀疑派）审查产物，报告写入 `run/review/<主会话8>/<评估者8>/review.md`（分目录，杜绝覆盖）。**触发判据（双通道并存观察期，2026-08-31 framework-redesign 方向 1）**：① **显式审查点**——turn 文本含 `@review <路径>` 即必审（不受冷却/hash 约束，触发权交还主 agent；观察期后自动通道退役、此通道成主判据 + 会话结束兜底）；② **自动嗅探**——仅当 turn 内有"实质交付物"（写了产物文件 OR 文本含"完成态动词+路径"）才审查，受冷却/hash 约束；讨论/规划句轮不触发；**审查自输出**（报告/空记录/selfcheck/r7- 存档/INDEX）永不触发（防自激）；handoff 等审计文档在审查面内（可被审）。**问题分级**（S 系列严重度）：S0 实质（标【需用户确认】）/ S1 有依据（自行判定）/ S2 建议。共享逻辑在 `reviewer-shared.ts`（单一事实来源，源码与测试共用）。R7 自审（2026-08-31）修复：`$` 锚定死代码、规划句误触发、todo_write 误触发、触发风暴、空报告落盘、分目录写盘、摘要桩、报告标志提取。**审查风暴抑制**（仅约束自动通道）：P0-A 冷却期（同主会话 15min 窗口内成功审查 ≥2 次 → 暂停自动审查，延迟不丢弃；`UNIVEDGE_REVIEW_COOLDOWN_MIN`/`UNIVEDGE_REVIEW_MAX_PER_WINDOW` 可调）+ P0-B 产物 hash 去重（内容未变不重审）+ P1-A quiet 指令（turn 文本含 `--no-review` 或 `review:off` 即跳过，quiet 优先于声明）+ P2-A 触发可见性（报告头标注触发 turn 与触发通道 declared/auto） |
 | `analyze_session.py` | 协议遵守率统计脚本：解析 session.jsonl.zstd，输出 7 项指标（L0/L1/L2/工具代算/锚点） |
 | `cordis.patch.yml` | 注册以上插件的 patch（用 `--patch` 加载；"新增 entry"须用 `insert:` 语法） |
+| `tests/l1-seat.ts` + `test-results/2026-10-10-l1-seat.md` | L1 座位迁移单元测试（50 用例：导出契约 + L1 内容完整性 + workspace 根发现 + section 注册行为（伪宿主：名称/次序/provider/幂等/隔离/时序兜底/next() 决策不变）+ 审计留痕 + 静态回归守卫——守卫源码不得再出现 `agent.inject` / `kind: 'user'` / `l1InContext` / `readL1Brief`，且必须用 in-tree 惯用法 `agent.ctx.inject`），**50/50 通过**；运行 `tsx --tsconfig <dsh>/tsconfig.json tests/l1-seat.ts`（测试经 `UNIVEDGE_L1_LOG` 写临时日志，不污染生产审计日志）。边界：宿主集成（真实提示组装中 L1 是否出现）不在断言范围，须重启实例后验证 |
 | `test-runner.ts` + `test.patch.yml` | 测试专用：headless 主任务后不退出，轮询审查报告生成再退出（验证 reviewer 用） |
 | `tests/reviewer-deliverable.ts` + `test-results/` | reviewer 逻辑单元测试（import reviewer-shared，69 用例：触发判据 A/B + 缺陷 2/3/4 + S1-1/S1-4/S1-5 + S2-2 + 风暴抑制 P0-A/P0-B/P1-A + r7- 豁免 + @review 声明通道 + INDEX 触发通道列）+ 落盘结果（如 `test-results/2026-08-31-reviewer-deliverable.md`）——运行 `tsx --tsconfig <dsh>/tsconfig.json tests/reviewer-deliverable.ts`；"通过"声明的可核产物 |
 
 ## 机制（分层）
 
 - **L0 入口地图**：dsh 原生自动加载 workspace 的 `AGENTS.md`（`agent-instructions` 包，每步前注入模型上下文）——这是 dsh 内置能力，不需要本适配层。
-- **L1 方法论层（本适配层负责）**：`univedge-l1-inject` 注入 METHODOLOGY §0+§1（任务契约模板、启动自省、配置基线、锚点原则）+ review-lessons 基层（B1-B4+P 五根因）。
-- **双时机注入（长会话保障）**：
-  - `agent/session-start`：注入**全量 L1**（首步完整方法论）；
-  - `agent/pre-step`：每步前检查 L1 是否仍在模型可见上下文（session surface）——被 dsh 自动 compaction（token 压力/上下文溢出）影子化后**自动重新注入精简版**（基层 + 契约要点 + 产物格式，~25 行）。与 `agent-instructions`（AGENTS.md 每步注入）同模式；仅缺失时注入，避免每步重复的 token 成本。
-  - 实测（7 步任务）：全量 1 次 + 精简版 1 次（step 2 处 surface 时序竞争窗口补位，无害），step 3+ 去重生效零注入。
-- **workspace 发现**：插件用 `agent.session.header.cwd`（session 的 workspace）向上找含 `METHODOLOGY.md` 的目录（最多 16 层）；找不到则不注入（不干扰其他 workspace）。
+- **L1 方法论层（本适配层负责）**：`univedge-l1-inject` 提供 METHODOLOGY §0+§1（任务契约模板、启动自省、配置基线、锚点原则）+ review-lessons 基层（B1-B4+P 五根因）。
+- **座位：会话作用域 system prompt section（2026-10-10 改造，取代"用户消息注入"）**：
+  - `agent/session-start`：在 **agent 自己的作用域**注册 section——`systemPrompt.section({ name: 'univedge:l1', order: 10, text })`（`packages/core/system-prompt` 的注册表 API，本机 checkout 可核：`src/index.ts:381` 方法、`:52-75` 类型）→ 只对本会话生效，并随会话作用域释放而注销。
+  - `text` 是 **provider**（`text: () => readL1(root)`），每次提示组装时从磁盘重读 METHODOLOGY.md / review-lessons.md（保持"与源同步"）；读取失败降级为可读告警而非抛错——provider 抛错会波及整次组装，等于让方法论层拖垮会话。
+  - order 取 10：dsh 约定 `-100` harness 身份 / `-99` harness 源码 / `0` 部署 persona / `100–199` 工具指导（`src/index.ts:56-60`）→ L1 排在 persona 之后、工具指导之前。
+  - **为何不再需要每步补注入**：系统提示每次请求重新组装，compaction 只重写消息流、不触及系统提示 → L1 天然免疫压缩。旧版 `agent/pre-step` 的"缺失补精简版"与 surface 全文扫描（`l1InContext`）随之删除（约 30 行），L1 也不再以"用户发言"形态出现在界面上。
+  - `agent/pre-step` 仅保留**幂等兜底**（若 session-start 晚于首个请求组装，首步补注册）：WeakMap 去重、不注入任何消息、原样返回 `next()` 决策。
+- **workspace 发现**：插件用 `agent.session.header.cwd`（session 的 workspace）向上找含 `METHODOLOGY.md` 的目录（最多 16 层）；找不到则不注册（不干扰其他 workspace），并记住该判定，避免每步重走目录发现。
+- **可核性变化（重要）**：系统提示**不落盘**——实测 app-boot 的 harness 源码 section 特征串在 `session.jsonl.zstd` 中 0 命中 → "L1 已注册"不再能从会话日志读出。改由插件诊断日志 `/tmp/univedge-l1.log` 留痕（`l1 section registered session=<id> workspace=<根>`，与 reviewer 的 `/tmp/univedge-reviewer.log` 同惯例；路径可用 `UNIVEDGE_L1_LOG` 覆盖）；`analyze_session.py` 的 L1 指标已改为"会话日志旧标记 OR 诊断日志注册行"，并打印 `L1 判定来源` 以便区分；行为侧指标（L2 契约/自省）不受影响。
 - **审查风暴抑制**（reviewer 附带，2026-08-31 review-storm-diagnosis 修复）：触发判据只问"有无交付物"不问"是否已被审过"，导致 审查→修订→审查 反馈环（2h 6 次审查）。补三层感知：**冷却期**（同主会话滑动窗口内成功审查 ≥`UNIVEDGE_REVIEW_MAX_PER_WINDOW`（默认 2）次 → 暂停自动审查 `UNIVEDGE_REVIEW_COOLDOWN_MIN`（默认 15）分钟，延迟不丢弃）；**hash 去重**（产物内容与上次被审时全同 → 跳过）；**quiet 指令**（turn 文本含 `--no-review` / `review:off` → 跳过，替代全关硬开关）。判定逻辑均为 `reviewer-shared.ts` 纯函数（可单测），`univedge-reviewer.ts` 只维护状态。检查顺序：熔断 → 限流 → quiet → **声明通道（@review 必审）** → 自动判据 → 冷却 → hash → 触发。
 - **显式审查点**（2026-08-31 framework-redesign 方向 1，双通道并存观察期）：复杂度根源 = 自动嗅探判据在猜测"是否完成且值得审"（任务状态，不在事件流里），启发式不精确 → 过滤器叠加螺旋（风暴抑制五件套中冷却/hash 正是为此买单）。理念反转：**审查由"完成宣告"驱动，不由"写入文件"驱动**——主 agent 在产物达到 **claimed**（完成态、可被独立验证）时以 `@review <路径>` 宣告审查请求（专有标记；可列多路径清单）；**响应审查意见的修订不自动重宣**（修订 ≠ 重新完成——风暴结构性消失）；quiet 指令 `--no-review` / `review:off` 声明本轮不审查。**方法论已内化**：本语义写入 `METHODOLOGY.md §1.7`（位于 L1 注入段 §0–§1，随 `univedge-l1-inject.ts` 自动注入主 agent——外部用户拿到仓库同样生效，观察期 A 指标 = 主 agent 文档遵守率，非用户提醒率）；`VERIFICATION.md §3.4` 指向其触发语义。会话结束兜底留待观察期结束切换时实现。观察期双通道并存：报告头标 `触发通道: declared/auto`，对比触发量与覆盖后再退役自动通道（届时删除 hasDeliverable 启发式 + 冷却 + hash）。
 
@@ -103,13 +107,13 @@ workspace 在 UI 里选（可任选 UnivEdge 目录）——无 headless 的 wor
 | L3-2 | 独立评估者（R7）：turn/end 自动 spawn，怀疑派审查成立 | ✅ |
 | L3-3 | 度量：analyze_session.py 7 项指标区分有无 L1 | ✅ |
 | L4 | 真实任务双宿主对比：数值等价 / 方法论纪律决定性差异 | ✅ |
-| 长会话 | L1 全程在场（26 步）；compaction 恢复路径 | ✅ / 待真实任务 |
+| 长会话 | L1 全程在场（26 步） | ✅ |
 
-**结论**：dsh + UnivEdge 组合的完整验证链路闭环——"方法论的强制执行"从入口（L0）到纪律（L2）到能力（L3）到真实对比（L4）全部成立。真实使用中持续观察 compaction 恢复路径即可。
+**结论**：dsh + UnivEdge 组合的完整验证链路闭环——"方法论的强制执行"从入口（L0）到纪律（L2）到能力（L3）到真实对比（L4）全部成立。（上表"长会话"行原记"compaction 恢复路径待真实任务观测"：2026-10-10 L1 改坐系统提示 section 后，该路径**结构上不再存在**——系统提示每次请求重新组装，不受 compaction 影响。）
 
 ## 后续待办
 
-- 插件当前假设 UnivEdge 目录含 `METHODOLOGY.md` 与 `knowledge/review-lessons.md`；若结构变动需同步更新 `readL1()` / `readL1Brief()`。
+- 插件当前假设 UnivEdge 目录含 `METHODOLOGY.md` 与 `knowledge/review-lessons.md`；若结构变动需同步更新 `readL1()`。
 - `univedge-reviewer` 的触发是 `turn/end`（headless 一次性进程会因进程退出而中断审查，Web 持续模式无此问题；`test-runner.ts` 专用于 headless 下验证完整链路）。
 - `submit_hpc_job` 待补：非法值测试 / 锚点完整性（ref 非空≠有参照）/ 正常提交冒烟。
-- pre-step 注入的长会话恢复路径（L1 被 compaction 影子化后自动补精简版）尚未在真实长会话中观测触发——逻辑已验证（surface 投影检查），建议未来长任务中留意。
+- **宿主集成待实测（2026-10-10 改造后）**：`agent/session-start` 注册 section 的时机是否早于首个请求的提示组装——若晚一步，首步会缺 L1（已留 `agent/pre-step` 幂等兜底，但兜底是否在同一 step 的组装前生效，需实测）。验证方法：重启实例，问 agent 复述 B1–B4+P，并核对 `/tmp/univedge-l1.log` 的注册行。

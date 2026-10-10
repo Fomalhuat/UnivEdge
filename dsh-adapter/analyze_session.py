@@ -15,7 +15,9 @@ UnivEdge × dsh：协议遵守率统计工具（L3-3，度量基础，4.1 验证
 
 指标口径（与 UnivEdge 加载协议 L0-L2 + VERIFICATION 检查项对齐）：
   - L0 入口加载：user/message 里出现 AGENTS.md 内容（agent-instructions 注入）
-  - L1 强制注入：user/message 里出现"UnivEdge 方法论 L1 层"（univedge-l1-inject 标记）
+  - L1 注入：2026-10-10 起 L1 常驻**系统提示 section**（每次请求重新组装，不落盘 → 会话日志中不可见），
+    改由插件诊断日志 /tmp/univedge-l1.log 的注册行判定（路径可用 UNIVEDGE_L1_LOG 覆盖）；兼容 2026-10-10 前的旧会话
+    （user/message 里带"UnivEdge 方法论 L1 层"标记）
   - L1 导航：read 工具调用了 knowledge/ 或 METHODOLOGY/VERIFICATION 文件
   - L2 契约：assistant 输出**或产物文件**含"任务契约/完成定义/验证标准/测试计划"
   - L2 自省：assistant 输出**或产物文件**含"启动自省/根因/B1/B2/B3/B4"（B1-B4+P 逐条内省）
@@ -67,7 +69,26 @@ def resolve_path(arg: str | None) -> str:
 
 # ---- 指标提取 ----
 
-def extract(events: list[dict], artifacts_dir: str | None = None) -> dict:
+def l1_registered_in_diag(session_path: str) -> bool:
+    """L1 座位迁移（2026-10-10）后，L1 常驻系统提示、不落盘 → 以插件诊断日志的注册行判定。
+
+    日志行格式（univedge-l1-inject.ts 的 diag()）：
+        [ISO] l1 section registered session=<session id> workspace=<UnivEdge 根>
+    匹配口径：优先按会话目录名（session-<uuid>，与 SessionHeader.id 一致）匹配；
+    退化为 uuid 子串匹配。日志不存在（插件未加载 / 非 UnivEdge workspace）→ False。
+    """
+    try:
+        with open(os.environ.get('UNIVEDGE_L1_LOG', '/tmp/univedge-l1.log'), 'r', encoding='utf-8', errors='replace') as f:
+            diag = f.read()
+    except OSError:
+        return False
+    if not diag:
+        return False
+    name = os.path.basename(os.path.dirname(os.path.abspath(session_path)))
+    uuid = name[len('session-'):] if name.startswith('session-') else name
+    return f'session={name}' in diag or (bool(uuid) and uuid in diag)
+
+def extract(events: list[dict], artifacts_dir: str | None = None, session_path: str = '') -> dict:
     """从事件列表提取指标所需的原始信号。"""
     read_files: set[str] = set()          # read 工具读取的文件
     tool_names: list[str] = []            # 所有工具调用名
@@ -136,9 +157,12 @@ def extract(events: list[dict], artifacts_dir: str | None = None) -> dict:
     # 指标判定。
     # 口径：L0/L1 看注入侧（user 文本）；L2 契约/自省、锚点看 agent 的实际产出
     # （assistant 输出 + 产物文件——agent 把方法论产物写进文件而非对话文本时不被漏判）。
+    # L1 注入判定：两个来源——旧会话的 user/message 注入标记，或插件诊断日志的注册行。
+    l1_legacy = bool(re.search(r'UnivEdge 方法论 L1 层', all_usr))
+    l1_diag = l1_registered_in_diag(session_path)
     metrics = {
         'L0 入口加载': bool(re.search(r'AGENTS\.md|Instructions from: AGENTS', all_usr)),
-        'L1 强制注入': bool(re.search(r'UnivEdge 方法论 L1 层', all_usr)),
+        'L1 注入': l1_legacy or l1_diag,
         'L1 导航': bool(read_files),
         'L2 契约(产出)': bool(re.search(r'任务契约|contract\.md|完成定义', all_prod)),
         'L2 自省(逐条)': bool(re.search(r'启动自省|基层已加载|逐条内省|B1.*B2.*B3.*B4', all_prod, re.S)),
@@ -154,6 +178,7 @@ def extract(events: list[dict], artifacts_dir: str | None = None) -> dict:
         'assistant_chars': len(all_ast),
         'artifact_files': sorted(artifact_paths),
         'n_events': len(events),
+        'l1_source': ('旧版会话日志注入' if l1_legacy else '') + ('+' if l1_legacy and l1_diag else '') + ('诊断日志(系统提示段)' if l1_diag else ''),
     }
 
 def render(result: dict) -> str:
@@ -162,6 +187,7 @@ def render(result: dict) -> str:
     lines.append('=== UnivEdge 协议遵守率分析 ===')
     lines.append(f'事件数: {result["n_events"]}   assistant 输出字符: {result["assistant_chars"]}')
     lines.append(f'source.kind: {", ".join(result["sources"]) or "(无)"}')
+    lines.append(f'L1 判定来源: {result.get("l1_source") or "(未检出——插件未加载 / 非 UnivEdge workspace / 日志已清理)"}')
     lines.append('')
     lines.append('| 指标 | 结果 |')
     lines.append('|---|---|')
@@ -187,7 +213,7 @@ def main() -> None:
         print(f'未找到 session 日志: {path or arg}')
         sys.exit(1)
     events = read_session(path)
-    result = extract(events, artifacts_dir)
+    result = extract(events, artifacts_dir, path)
     print(f'分析对象: {path}')
     print(render(result))
 

@@ -1,8 +1,41 @@
 import type { Context } from '@deepseek-ai/cordis'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, appendFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 
 export const name = 'univedge-l1-inject'
+
+/**
+ * 依赖声明：`systemPrompt` 服务就绪后再 apply。
+ * dsh 插件加载器识别模块级 `inject`（in-tree 先例：packages/client/ui-deliverables/src/index.ts:12，经
+ * packages/bundle/web-app/cordis.patch.yml 作为插件加载）。
+ */
+export const inject = ['systemPrompt']
+
+/**
+ * L1 section 的名字与次序。
+ * order 约定（packages/core/system-prompt/src/index.ts:56-60）：`-100` harness 身份、`-99` harness 源码、
+ * `0` 部署 persona、`100–199` 工具指导。L1 取 10 —— 排在 persona 之后、工具指导之前，即"先是谁、再是纪律、后是工具"。
+ */
+export const L1_SECTION_NAME = 'univedge:l1'
+export const L1_SECTION_ORDER = 10
+
+/**
+ * 诊断日志（与 univedge-reviewer 同惯例：`/tmp/univedge-*.log`）。
+ * 存在理由：**系统提示不落盘**（实测：app-boot 的 harness 源码 section 特征串在 session.jsonl.zstd 中 0 命中），
+ * 因此"L1 已注册"这一事实在会话日志里不可见，只能由本日志留痕供审计。
+ * 路径可用 `UNIVEDGE_L1_LOG` 覆盖（测试用：避免测试注册污染生产审计日志）。
+ */
+function diagPath(): string {
+  return process.env.UNIVEDGE_L1_LOG ?? '/tmp/univedge-l1.log'
+}
+
+function diag(...args: unknown[]): void {
+  try {
+    appendFileSync(diagPath(), `[${new Date().toISOString()}] ${args.map(String).join(' ')}\n`)
+  } catch {
+    // 诊断不可用不影响注入本身。
+  }
+}
 
 /**
  * 确认纪律（注入器层行为约定，2026-09-02 加入）：
@@ -22,9 +55,9 @@ const CONFIRM_DISCIPLINE = `【确认纪律（澄清 §1 确认义务的粒度�
 
 /**
  * 从 workspace（session cwd）向上发现 UnivEdge 根：
- * 逐级向上找含 METHODOLOGY.md 的目录；找不到返回 undefined（不注入，避免干扰其他 workspace）。
+ * 逐级向上找含 METHODOLOGY.md 的目录；找不到返回 undefined（不注册，避免干扰其他 workspace）。
  */
-function findUnivEdgeRoot(start: string | undefined): string | undefined {
+export function findUnivEdgeRoot(start: string | undefined): string | undefined {
   let dir = start
   for (let depth = 0; dir && depth < 16; depth += 1) {
     if (existsSync(join(dir, 'METHODOLOGY.md'))) return dir
@@ -36,7 +69,7 @@ function findUnivEdgeRoot(start: string | undefined): string | undefined {
 }
 
 /** 提取 UnivEdge L1 层：METHODOLOGY §0+§1 + review-lessons 基层（与 METHODOLOGY 加载协议 L1 一致）。 */
-function readL1(root: string): string {
+export function readL1(root: string): string {
   const methodology = readFileSync(join(root, 'METHODOLOGY.md'), 'utf8')
   const lines = methodology.split('\n')
   const start = lines.findIndex((l) => l.startsWith('## 0.'))
@@ -49,7 +82,7 @@ function readL1(root: string): string {
   const base = rlStart >= 0 && rlEnd > rlStart ? reviewLessons.slice(rlStart, rlEnd) : ''
 
   return [
-    '以下是你必须遵循的 UnivEdge 方法论 L1 层（每次任务开始必加载，来自 METHODOLOGY §0+§1 与 review-lessons 基层）：',
+    '## UnivEdge 方法论 L1 层（常驻规范：METHODOLOGY §0+§1 + review-lessons 基层）',
     '',
     l1,
     '',
@@ -59,65 +92,61 @@ function readL1(root: string): string {
   ].join('\n')
 }
 
-/** 精简版 L1（长会话保障，~25 行）：基层 + 契约要点 + 产物格式。基层动态提取（与源同步），要点为稳定摘要。 */
-function readL1Brief(root: string): string {
-  const reviewLessons = readFileSync(join(root, 'knowledge/review-lessons.md'), 'utf8')
-  const rlStart = reviewLessons.indexOf('## 基层')
-  const rlEnd = reviewLessons.indexOf('## 新增教训流程')
-  const base = rlStart >= 0 && rlEnd > rlStart ? reviewLessons.slice(rlStart, rlEnd).trim() : ''
-
-  return [
-    '以下是你必须遵守的 UnivEdge 方法论精简版（每步自省提醒；完整版与任务契约模板见 workspace 的 METHODOLOGY.md）：',
-    '',
-    '【启动自省（B1-B4+P，动手前逐条内省）】',
-    base,
-    '',
-    '【任务契约要点（动手前声明）】完成定义 + 验证标准 + 测试计划（概要层给研究者：测试项+判据+目的；明细层给评估器）+ 配置基线 + 已知参照值。',
-    '【状态机】未锚定（无独立参照）的结论只能标 claimed；LLM 无权自标 verified，须经独立验证/人工复核。',
-    '【审查触发】产物达到 claimed（完成态、可被独立验证）时宣告审查请求（宿主语法 @review <路径>，可列多路径）；响应审查意见的修订不自动重宣；quiet: --no-review / review:off。',
-    '【产物格式】假设清单 + 有效域 + 误差预算 + 状态标签。',
-    '【工具代算】LLM 永不手算作为最终产物；符号/数值计算由工具执行，并做独立交叉验证（多路线互证）。',
-    '【确认纪律】锚点自检每步内化不停；但仅 4 类情况停下来问用户：①方向分叉 ②新契约/契约变更 ③产物结论化（claimed/verified/入库/交付）④外部副作用（push/删除/写 workspace 外）。纯执行步骤直接做，收尾用进展简报（"已做 X，结果 Y，下一步 Z"），不以问句结尾；用户已给方向时收敛为推荐+自执行；同一事项不重复确认。',
-  ].join('\n')
+/**
+ * section 文本求值：每次提示组装时从磁盘重读（保持"与源同步"，与旧版每步注入的行为一致）。
+ * 读取失败时降级为可读告警而非抛错——provider 抛错会波及整次组装，等于让方法论层拖垮会话。
+ */
+function render(root: string): string {
+  try {
+    return readL1(root)
+  } catch (error) {
+    return [
+      '## UnivEdge 方法论 L1 层加载失败',
+      '',
+      `读取 ${root} 下的 METHODOLOGY.md / knowledge/review-lessons.md 失败：${(error as Error).message}`,
+      '',
+      '本次组装未提供 L1。请手动加载 METHODOLOGY.md §0/§1 与 knowledge/review-lessons.md 基层后再动手。',
+    ].join('\n')
+  }
 }
 
-/** 检查 L1（全量或精简版）是否已在模型可见上下文（session surface）。在则跳过注入——省 token；compaction 影子化后自动恢复。 */
-function l1InContext(agent: any): boolean {
-  const events = agent.session?.events ?? []
-  const nodes = agent.session?.surface?.nodes ?? []
-  for (const seq of nodes) {
-    const ev = events[seq]
-    if (ev?.type === 'user/message') {
-      const content = ev.data?.content ?? []
-      const txt = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('')
-      if (txt.includes('UnivEdge 方法论')) return true
-    }
+/** 每个 agent 只播种一次：同层同名 section 重复注册会 throw。 */
+const seeded = new WeakMap<object, 'registered' | 'skipped'>()
+
+function seedSection(agent: any): void {
+  if (agent === undefined || agent === null) return
+  if (seeded.has(agent)) return
+  if (typeof agent.ctx?.inject !== 'function') return // 作用域不可用：不记状态，留给下次重试
+  const root = findUnivEdgeRoot(agent.session?.header?.cwd)
+  if (root === undefined) {
+    seeded.set(agent, 'skipped') // 非 UnivEdge workspace：不注册，且不必每步重走目录发现
+    return
   }
-  return false
+  seeded.set(agent, 'registered')
+  // 在 agent 自己的作用域注册 → 只对本会话生效，并随会话作用域释放而注销。
+  // 用 dsh in-tree 惯用法 `agent.ctx.inject([服务], cb)`（先例：packages/context/file-reference-local/src/index.ts:69）
+  // 而非直接属性访问——服务未就绪时直接访问会撞上 Cordis 的未知属性抛错。
+  agent.ctx.inject(['systemPrompt'], (scope: any) => {
+    scope.systemPrompt.section({
+      name: L1_SECTION_NAME,
+      order: L1_SECTION_ORDER,
+      text: () => render(root),
+    })
+    diag('l1 section registered', `session=${agent.session?.header?.id}`, `workspace=${root}`)
+  })
 }
 
 export function apply(ctx: Context): void {
-  // 会话启动：注入全量 L1（L0 AGENTS.md 之外的完整方法论层）
+  // 主路径：会话启动即把 L1 注册为系统提示 section。
+  // L1 因此恒在系统提示中（每次请求重新组装 → 对 compaction 免疫），且不进入对话流（不再显示为用户消息）。
   ctx.on('agent/session-start', ({ agent }) => {
-    const cwd = agent.session.header.cwd
-    const root = findUnivEdgeRoot(cwd)
-    if (!root) return
-    agent.inject({
-      content: [{ type: 'text', text: readL1(root) }],
-      source: { kind: 'user' },
-    })
+    seedSection(agent)
   })
 
-  // 长会话保障：每步前检查 L1 是否仍在模型可见上下文；被 compaction 压缩/影子化后自动重新注入精简版。
-  // 与 agent-instructions（AGENTS.md 每步注入）同模式；仅在 L1 缺失时注入，避免每步重复的 token 成本。
+  // 兜底：若 session-start 晚于首个请求的提示组装，首步补播种。
+  // 幂等（WeakMap 去重），且**不注入任何消息**——与旧版"缺失补精简版"的本质区别。
   ctx.on('agent/pre-step', async ({ agent }, next) => {
-    const root = findUnivEdgeRoot(agent.session.header.cwd)
-    if (!root) return next()
-    if (l1InContext(agent)) return next()
-    agent.inject({
-      content: [{ type: 'text', text: readL1Brief(root) }],
-      source: { kind: 'user' },
-    })
+    seedSection(agent)
     return next()
   })
 }
