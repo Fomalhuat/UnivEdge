@@ -5,7 +5,7 @@ UnivEdge 的记录系统，agent 可读。与"生成"解耦：这里是**已核�
 
 ## 目录
 
-> **分层**：`conventions.md` 与 `review-lessons.md` 是**内核**（通用，随发布，GitHub 可见）；`review-lessons-examples.md`、`benchmarks.md`、`claims.md`、`papers/` 是**领域资产**（具体科研案例/数值/主张/文献核对记录，THZ 项目私有，**非内核预置——由使用者按需自建**，已被 .gitignore 排除，不随公开内核发布；本地完整版保留）。
+> **分层**：`conventions.md` 与 `review-lessons.md` 是**内核**（通用，随发布，GitHub 可见）；`review-lessons-examples.md`、`benchmarks.md`、`claims.md`、`papers/` 是**领域资产**（具体科研案例/数值/主张/文献核对记录，THZ 项目私有，**非内核预置——由使用者按需自建**，已被 .gitignore 排除，不随公开内核发布；本地完整版保留）；`work-types.md` 为**混合**——状态定义与迁移规则（§1）属内核（已同步进 METHODOLOGY §1.7），工作类型数据（§2/§3）属领域资产。
 
 | 文件 | 内容 | 关联 |
 |---|---|---|
@@ -15,6 +15,7 @@ UnivEdge 的记录系统，agent 可读。与"生成"解耦：这里是**已核�
 | `benchmarks.md` | 基准结果库（**领域资产**）：文献基准值、已知特解、可复现判据 | VERIFICATION NC-01/NC-06 的参照来源 |
 | `claims.md` | 主张注册表（**领域资产**）：主张及其状态（claimed/verified/rejected） | METHODOLOGY §0.3 状态机 |
 | `papers/` | 文献库（**领域资产**）：已核对论文、公式溯源、约定对照 | METHODOLOGY §4 文献核对 |
+| `work-types.md` | 工作类型状态表（**规则内核 / 数据领域资产**）：决策门信号①的**查表载体**——状态（capability/regression/retired）+ 审查计数 + 漏审登记 | METHODOLOGY §1.7 决策门；docs/09 §3.8 |
 
 ## 使用约定
 
