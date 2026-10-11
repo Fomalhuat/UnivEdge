@@ -346,7 +346,7 @@ check('声明解析：含空格的中文路径不会被截断成子串',
   // (d) 任务描述按触发轮窗口取（原取会话首条 = L1 注入全文）
   const evs2 = [
     { seq: 1, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: '（会话首条：L1 方法论注入全文……）' }] } },
-    { seq: 50, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: '本轮任务：修 L1 座位' }] } },
+    { seq: 50, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: '本轮任务：修 L1 座位迁移与证据门，请评估交付' }] } },
   ]
   const rw = extractReviewInput({ header: { cwd: repoRoot }, events: evs2 }, 40, 60, [])
   check('组包：任务描述取自触发轮（非会话首条 L1 文本）', rw.task.startsWith('本轮任务'), true, 'S0-3')
@@ -357,6 +357,16 @@ check('声明解析：含空格的中文路径不会被截断成子串',
     { seq: 50, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: '请评估 L1 证据门这一单元的交付并给出提交建议' }] } },
     { seq: 60, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: '可以' }] } },
   ]
+  // R7 第十轮 S1-3：回执（subagent-settled/report）不得被选为任务描述——fixture 必须包含该情形
+  const evs5b = [
+    { seq: 1, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: '（会话首条：L1 方法论注入全文……）' }] } },
+    { seq: 55, type: 'user/message', data: { source: { kind: 'subagent-settled' }, content: [{ type: 'text', text: 'Background subagent xyz finished and will do no further work unless you send it more.' }] } },
+    { seq: 60, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: '可以' }] } },
+  ]
+  const rsub = extractReviewInput({ header: { cwd: repoRootOf(import.meta.url) }, events: evs5b }, 60, 60, [])
+  check('组包：回执不被选为任务描述（S1-3 修）', rsub.task.startsWith('Background subagent'), false, 'S1-3')
+  check('组包：无可回落长消息时如实标注低信息量（trigger-turn-short）', rsub.taskSource, 'trigger-turn-short', 'S1-3')
+
   const rshort = extractReviewInput({ header: { cwd: repoRootOf(import.meta.url) }, events: evs5 }, 60, 60, [])
   check('组包：触发轮短回复（"可以"）→ 回落取最近长消息', rshort.task.startsWith('请评估 L1 证据门'), true, 'S1-3')
   check('组包：来源标注为 recent-user', rshort.taskSource, 'recent-user', 'S1-3')

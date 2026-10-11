@@ -134,19 +134,37 @@ for suite in "${SUITES[@]}"; do
   bare="${full%%/*}"; fresh="$fresh $bare"   # 裸计数也算合法出现形式
 done
 # 同时覆盖套件表里的**裸计数**行（| \`suite\` | N | ），第九轮 S1-2 指出仅查 "N/N 通过" 会漏掉这里
+# 扫描面 = README + `run/*/contract.md`（R7 第十轮 S1-1：只扫 README 会漏掉契约里的陈旧判据）
+CONTRACT_DOCS="$(ls "$ROOT"/run/*/contract.md 2>/dev/null)"
 doc_counts="$( { grep -o '[0-9]*/[0-9]* 通过' README.md 2>/dev/null; \
+  [ -n "$CONTRACT_DOCS" ] && grep -oh '[0-9]*/[0-9]* 通过' $CONTRACT_DOCS 2>/dev/null; \
   for suite in "${SUITES[@]}"; do sed -nE "s/^\| \`?${suite}\`? \| ([0-9]+) \|.*/\1/p" README.md 2>/dev/null; done; } | sort -u | tr '\n' ' ')"
 missing=""
 for c in $fresh; do case " $doc_counts " in *" $c "*) ;; *) missing="$missing $c";; esac; done
 extra=""
 for c in $doc_counts; do case " $fresh " in *" $c "*) ;; *) extra="$extra $c";; esac; done
 if [ -n "$missing$extra" ]; then
-  echo "⚠ 文档计数不一致（README）：缺少${missing:- 无}；多出/过期${extra:- 无}"
+  echo "⚠ 文档计数不一致（README + run/*/contract.md）：缺少${missing:- 无}；多出/过期${extra:- 无}"
   echo "   本轮实测：$fresh"
   echo "   依据：'文档计数落后于代码'同类第 4 次复发（R7 第九轮 S1-2：存在性检查漏掉并存矛盾）。"
   echo
 fi
 
+# ---- 环境记录（R7 第十轮 S2-3）：与证据同批落盘，供 NC-04 直接核对 ----
+envfile="test-results/${DATE_PREFIX}-env.md"
+{
+  echo "# 运行环境（run-tests.sh 自动记录）"
+  echo
+  echo "- 时间（UTC）: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  echo "- dsh checkout: $DSH_DIR"
+  echo "- node: $("$DSH_DIR/node_modules/.bin/tsx" --version 2>/dev/null | head -1 || true) / $(node -v 2>/dev/null || echo '?')"
+  echo "- tsconfig: $TS_CONFIG"
+  echo "- UnivEdge HEAD: $(cd "$ROOT" && git log -1 --format='%h %ci' 2>/dev/null || echo '?')"
+  echo "- 工作树: $(cd "$ROOT" && [ -z "$(git status --porcelain 2>/dev/null)" ] && echo 干净 || echo '有未提交改动')"
+  echo
+  echo "> 四份证据文件由同一次运行产生；本文件记录该次运行的环境（证据文件本身不重跑不会变）。"
+} > "$envfile"
+echo "▸ 环境记录: $envfile"
 echo
 if [ $UPDATE_BASELINE = "1" ]; then
   echo "▸ 已刷新基线：test-results/l1-baseline.json（记得随证据一起提交）"

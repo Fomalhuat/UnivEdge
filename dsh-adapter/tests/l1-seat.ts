@@ -13,7 +13,9 @@
  *  - 审计留痕：注册事实写入 /tmp/univedge-l1.log（系统提示**落盘于 request/header**（2026-10-10 实测），
  *    诊断日志补的是 request/header 不记录的"注册时刻/对象"；2026-10-10 R7 审查修 S1-5 前此处误写为"不落盘"）
  */
-import { readFileSync, existsSync, rmSync } from 'node:fs'
+import { readFileSync, existsSync, rmSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { name, inject, apply, readL1, findUnivEdgeRoot, L1_SECTION_NAME, L1_SECTION_ORDER, L1_CHAR_LIMIT, l1CharLimit } from '../univedge-l1-inject.ts'
@@ -170,6 +172,37 @@ check('越界时返回文本含告警行（agent/用户当轮即见——R7 第�
   overLimitText.startsWith('> ⚠ UnivEdge L1 尺寸超预算'), true, '门·触发')
 check('越界时写入 WARN 告警（门真的会响）',
   diagAfter.length > diagBefore.length && diagAfter.includes('WARN l1 size over budget'), true, '门·触发')
+
+// ---------- 9. 运行时证据新鲜度门（R7 第十轮 S1-5：机制此前只有 /tmp 日志一行、无断言防护） ----------
+// 与尺寸门同构：在伪根 + 伪宿主上调 provider，三态（不符/一致/缺失）逐态断言。
+// 缺此断言时，该门若日后被重构破坏，四套测试仍全绿（B4 型静默失效）。
+{
+  const fx = mkdtempSync(join(tmpdir(), 'l1gate-'))
+  mkdirSync(join(fx, 'knowledge'), { recursive: true })
+  mkdirSync(join(fx, 'dsh-adapter/test-results'), { recursive: true })
+  writeFileSync(join(fx, 'METHODOLOGY.md'), '## 0. 总则\n\n测试用最小 L1。\n\n## 2. 任务类\n')
+  writeFileSync(join(fx, 'knowledge/review-lessons.md'), '## 基层\n\nB1 x\n\n## 新增教训流程\n\n（略）\n')
+  const baselinePath = join(fx, 'dsh-adapter/test-results/l1-baseline.json')
+  const renderOnce = (): string => {
+    const captured: any[] = []
+    const handlers: Record<string, any> = {}
+    const agent: any = {
+      session: { header: { cwd: fx, id: 'session-gate' } },
+      ctx: { inject: (_d: string[], cb: any) => cb({ systemPrompt: { section: (c: any) => captured.push(c) } }) },
+    }
+    apply({ on: (e: string, h: any) => { handlers[e] = h } } as any)
+    handlers['agent/session-start']({ agent })
+    return typeof captured[0]?.text === 'function' ? (captured[0].text as (c: unknown) => string)({}) : ''
+  }
+  writeFileSync(baselinePath, JSON.stringify({ l1Sha256_16: 'deadbeefdeadbeef' }))
+  check('运行时门：基线不符 → 渲染文本以 ⚠ 告警开头', renderOnce().startsWith('> ⚠ UnivEdge L1'), true, 'S1-5')
+  const goodSha = createHash('sha256').update(readL1(fx)).digest('hex').slice(0, 16)
+  writeFileSync(baselinePath, JSON.stringify({ l1Sha256_16: goodSha }))
+  check('运行时门：基线一致 → 无告警', renderOnce().startsWith('> ⚠'), false, 'S1-5')
+  rmSync(baselinePath)
+  check('运行时门：基线缺失 → 静默（不打扰生产用户，已声明盲区）', renderOnce().startsWith('> ⚠'), false, 'S1-5')
+  rmSync(fx, { recursive: true, force: true })
+}
 
 // ---------- 输出 ----------
 const lines = [

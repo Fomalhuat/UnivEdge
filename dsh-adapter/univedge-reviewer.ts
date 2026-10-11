@@ -135,6 +135,9 @@ const DELIVERABLE_EXT_RE = /\.(?:md|markdown|txt|json|jsonl|yaml|yml|toml|ini|cf
  * 同文件的 `insideWorkspace()`（auto 通道）用 resolve(cwd,p) 是对的 → 本函数统一两者口径。
  */
 export function normalizeDeclared(cwd: string, paths: string[]): string[] {
+  // **有意不设 workspace 边界**（R7 第十轮 S2-1 提出）：声明通道的对象由主 agent 指定，是"意志信号"，
+  // 允许指向 workspace 外（如 dsh checkout、外部数据树）——与 auto 通道的 insideWorkspace() 校验
+  // 属**不同语义**而非口径不一致。若日后要收紧，须同时改 §1.7 的声明语义说明。
   return paths.map((p) => (p && !isAbsolute(p) ? resolve(cwd || '.', p) : p))
 }
 
@@ -170,6 +173,11 @@ export function extractReviewInput(session: any, startSeq = 0, endSeq = Number.M
   const evts = session?.events ?? []
   for (const ev of evts) {
     if (ev.type === 'user/message') {
+      // R7 第十轮 S1-3：**按 source.kind 排除子代理回执**——回执不是指令，且实测本单元的任务描述
+      // 曾被取成 "Background subagent … finished …"（recent-user 回落时命中回执）。
+      // 口径与 reviewer-shared.ts 的声明/quiet 扫描一致（同一代码库不得两套口径）。
+      const kind = ev.data?.source?.kind
+      if (kind === 'subagent-report' || kind === 'subagent-settled') continue
       const content = ev.data?.content ?? []
       const txt = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('')
       // R7 第五轮 S0-3：**按触发轮窗口取任务描述**——原实现取会话首条 user/message，
@@ -255,10 +263,14 @@ export function extractReviewInput(session: any, startSeq = 0, endSeq = Number.M
   // 并如实标注来源，供评估者判断该描述是否可信。
   const MIN_TASK_CHARS = 20
   const useRecent = (taskInWindow?.length ?? 0) < MIN_TASK_CHARS && shortUserTexts.length > 0
+  const shortInWindow = !useRecent && (taskInWindow?.length ?? 0) > 0 && (taskInWindow?.length ?? 0) < MIN_TASK_CHARS
   return {
     task: useRecent ? shortUserTexts[0] : (taskInWindow || task),
+    // 'trigger-turn-short' = 触发轮内只有短文本且无更长的用户消息可回落 → **如实标注低信息量**，
+    // 让评估者据此判断自包含性，而不是假装任务描述充分（R7 第十轮 S1-3）。
     taskSource: useRecent ? 'recent-user'
-      : taskInWindow ? 'trigger-turn' : (task ? 'session-first' : 'none'),
+      : shortInWindow ? 'trigger-turn-short'
+        : taskInWindow ? 'trigger-turn' : (task ? 'session-first' : 'none'),
     finalReply, artifacts: picked, dropped, fingerprints, snapshotAt: new Date().toISOString(),
   }
 }
@@ -409,7 +421,7 @@ function buildReviewerPrompt(root: string, input: { task: string; finalReply: st
     input.dropped && input.dropped.length
       ? `- ⚠ 未入列的候选产物（未被审查）：\n${input.dropped.map((a) => `  - ${a}`).join('\n')}`
       : '- 未入列的候选产物：无',
-    `- 任务描述来源：${input.taskSource ?? 'unknown'}（trigger-turn = 取自触发轮；session-first = 回落取会话首条，可靠性低）`,
+    `- 任务描述来源：${input.taskSource ?? 'unknown'}（trigger-turn = 取自触发轮；recent-user = 触发轮文本过短，回落取最近的长用户消息；trigger-turn-short = 触发轮只有短文本且无可回落的更长用户消息 → **自包含性可能不足**，请结合产物与最终回复判断；session-first = 回落取会话首条，可靠性低）`,
     '',
     `- **审查基于 ${input.snapshotAt} 的产物状态**（完善项 2）：组包时已记录每个产物的 (size, mtime, sha256 前 12 位)。**请对每个产物实测指纹并比对**；不一致即说明该文件在你审查期间被改写——此时**以你实测的版本为审查对象**，并在报告结论处显式标注"审查窗口内产物被改写：<文件>"。`,
     '',

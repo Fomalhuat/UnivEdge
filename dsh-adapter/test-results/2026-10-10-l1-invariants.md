@@ -9,7 +9,7 @@
 - **基线 = L1 内容指纹**（`test-results/l1-baseline.json`；L1 变化后运行 `bash dsh-adapter/run-tests.sh --update-l1-baseline` 刷新）
 - 以下为**输入整文件**指纹（仅供参考，**不**作为判据——切片外改动不应触发过期）：
   - `METHODOLOGY.md` → 37062B/2026-10-11T05:43:59.480Z/b0eaf216144f
-  - `knowledge/review-lessons.md` → 12491B/2026-10-11T05:45:31.149Z/7a4dc145cb24
+  - `knowledge/review-lessons.md` → 15234B/2026-10-11T06:15:41.477Z/696f97bb4be2
 
 | 组 | 义务 | 断言文本 | 结果 |
 |---|---|---|---|

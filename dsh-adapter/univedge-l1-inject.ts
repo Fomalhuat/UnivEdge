@@ -1,5 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
-import { readFileSync, existsSync, appendFileSync, statSync } from 'node:fs'
+import { readFileSync, existsSync, appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { join, dirname } from 'node:path'
 
@@ -131,20 +131,16 @@ export function readL1(root: string): string {
  *   - 基线缺失（生产环境/未建基线）→ **不告警**（门只对维护者有意义，不打扰普通用户）；
  *   - 基线存在但与现值不符 → 在 section 前追加一行告警，提示刷新证据（agent 与用户当轮可见）。
  */
-let baselineCache: { path: string; mtimeMs: number; sha: string | undefined } | undefined
-
 function baselineSha(root: string): string | undefined {
+  // **不做缓存**（R7 第十轮 S1-5 的断言当场抓到的缺陷）：曾用 `(path, mtimeMs)` 作缓存键，
+  // 但在同一 mtime 刻度内重写基线（且新旧 sha 串长度相同 → size 也相同）时缓存不失效，
+  // 门会持续报"过期"。基线文件只有几百字节，且 L1 本身每请求都要读两个更大的文件，
+  // 省这一次小读属过早优化 —— 正确性优先，取消缓存。
   const path = join(root, 'dsh-adapter', 'test-results', 'l1-baseline.json')
   try {
-    const st = statSync(path)
-    if (baselineCache !== undefined && baselineCache.path === path && baselineCache.mtimeMs === st.mtimeMs) {
-      return baselineCache.sha
-    }
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as { l1Sha256_16?: string }
-    baselineCache = { path, mtimeMs: st.mtimeMs, sha: parsed.l1Sha256_16 }
     return parsed.l1Sha256_16
   } catch {
-    baselineCache = undefined
     return undefined
   }
 }

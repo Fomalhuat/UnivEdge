@@ -13,11 +13,11 @@
 | `univedge-reviewer.ts` + `reviewer-shared.ts` | dsh 插件：任务完成后 spawn **独立评估者子 agent**（R7，怀疑派）审查产物，报告写入 `run/review/<主会话8>/<评估者8>/review.md`（分目录，杜绝覆盖）。**触发判据（双通道并存观察期，2026-08-31 framework-redesign 方向 1）**：① **显式审查点**——turn 文本含 `@review <路径>` 即必审（不受冷却/hash 约束，触发权交还主 agent；观察期后自动通道退役、此通道成主判据 + 会话结束兜底）；② **自动嗅探**——仅当 turn 内有"实质交付物"（写了产物文件 OR 文本含"完成态动词+路径"）才审查，受冷却/hash 约束；讨论/规划句轮不触发；**审查自输出**（报告/空记录/selfcheck/r7- 存档/INDEX）永不触发（防自激）；handoff 等审计文档在审查面内（可被审）。**问题分级**（S 系列严重度）：S0 实质（标【需用户确认】）/ S1 有依据（自行判定）/ S2 建议。共享逻辑在 `reviewer-shared.ts`（单一事实来源，源码与测试共用）。**输入包组包（2026-10-10，R7 第四轮 S1-5/S1-8/S0-1）**：`extractReviewInput` 三处修正——① `tool/call` 分支**按触发轮窗口过滤**（有 `@review` 声明路径时严格限轮内；此前会把整个会话历次工具调用的路径塞进输入包，评估者"审错文件却声称已审"）；② **结构化参数提取**（`file_path`/`path`/`notebook_path`/… 优先；原正则因 JSON 转义带尾随 `\\` 而漏掉全部结构化路径），正则降为 bash 命令等非结构化参数的兜底；③ **产物指纹**（`size/mtime/sha256 前 12 位`，随输入包下发给评估者，并在报告落盘前复检——漂移则在报告正文前自动标注"审查窗口内产物被改写"）。**插件改动需重启实例才生效**。R7 自审（2026-08-31）修复：`$` 锚定死代码、规划句误触发、todo_write 误触发、触发风暴、空报告落盘、分目录写盘、摘要桩、报告标志提取。**审查风暴抑制**（仅约束自动通道）：P0-A 冷却期（同主会话 15min 窗口内成功审查 ≥2 次 → 暂停自动审查，延迟不丢弃；`UNIVEDGE_REVIEW_COOLDOWN_MIN`/`UNIVEDGE_REVIEW_MAX_PER_WINDOW` 可调）+ P0-B 产物 hash 去重（内容未变不重审）+ P1-A quiet 指令（turn 文本含 `--no-review` 或 `review:off` 即跳过，quiet 优先于声明）+ P2-A 触发可见性（报告头标注触发 turn 与触发通道 declared/auto） |
 | `analyze_session.py` | 协议遵守率统计脚本：解析 session.jsonl.zstd，输出 7 项指标（L0/L1/L2/工具代算/锚点） |
 | `cordis.patch.yml` | 注册以上插件的 patch（用 `--patch` 加载；"新增 entry"须用 `insert:` 语法） |
-| `tests/l1-seat.ts` + `test-results/2026-10-10-l1-seat.md` | L1 座位迁移单元测试（67 用例：导出契约 + L1 内容完整性 + **L1 字符门（含门触发实测）** + workspace 根发现 + section 注册行为（伪宿主：名称/次序/provider/幂等/隔离/时序兜底/next() 决策不变）+ 审计留痕 + 静态回归守卫——守卫源码不得再出现 `agent.inject` / `kind: 'user'` / `l1InContext` / `readL1Brief`，且必须用 in-tree 惯用法 `agent.ctx.inject`），**67/67 通过**；运行 `tsx --tsconfig <dsh>/tsconfig.json tests/l1-seat.ts`（测试经 `UNIVEDGE_L1_LOG` 写临时日志，不污染生产审计日志）。宿主集成已另行实测（2026-10-10 17:54 重启，见下"可核性"） |
+| `tests/l1-seat.ts` + `test-results/2026-10-10-l1-seat.md` | L1 座位迁移单元测试（70 用例：导出契约 + L1 内容完整性 + **L1 字符门（含门触发实测）** + workspace 根发现 + section 注册行为（伪宿主：名称/次序/provider/幂等/隔离/时序兜底/next() 决策不变）+ 审计留痕 + 静态回归守卫——守卫源码不得再出现 `agent.inject` / `kind: 'user'` / `l1InContext` / `readL1Brief`，且必须用 in-tree 惯用法 `agent.ctx.inject`），**70/70 通过**；运行 `tsx --tsconfig <dsh>/tsconfig.json tests/l1-seat.ts`（测试经 `UNIVEDGE_L1_LOG` 写临时日志，不污染生产审计日志）。宿主集成已另行实测（2026-10-10 17:54 重启，见下"可核性"） |
 | `tests/l1-invariants.ts` + `test-results/2026-10-10-l1-invariants.md` + `test-results/l1-baseline.json` | **L1 义务不变量测试**（126 断言：§0 状态机与产物格式 + §1.1–§1.6 全部操作义务 + §1.7 操作面与**定义级判据**（信号名+判据文字同在场）+ **依赖闭包**（capability/regression/retired/查表不判断/实质发现/20 次）+ 基层五根因 + 确认纪律 4 类 + 层级结构），**126/126 通过**（基线，2026-10-10）。计数规则：**一条断言 = 一个义务**（括号子项不合并）。**证据新鲜度门**（第 H 组）：基线 = **L1 文本本身**的 sha256（存 `test-results/l1-baseline.json`，独立文件——因为 `> test-results/xxx.md` 会在测试开始前截断目标，若基线取自它则门形同虚设）；L1 变化而基线未刷新 → 测试失败并打印刷新命令（`UNIVEDGE_UPDATE_L1_BASELINE=1`）。**按 L1 切片而非输入整文**做指纹：切片外改动（版本头 / §2+ / 分歧日志）不误报（2026-10-10 实测）。**约定**：结果文件名用**任务日期**，头部"日期"为**生成日期**；"逐字节可复现"是同日属性（跨天后仅首行日期不同）。用途：任何 L1 改写（压缩/搬移/重写）必须保持全绿；边界：代理判据，不保证模型遵守、不覆盖同义改写弱化 |
 | `test-runner.ts` + `test.patch.yml` | 测试专用：headless 主任务后不退出，轮询审查报告生成再退出（验证 reviewer 用） |
 | `tests/reviewer-decision-gates.ts` + `test-results/2026-10-10-reviewer-decision-gates.md` | **四项裁决实现测试**（25 用例：`--force-review`/`review:force` 识别 + 误判排除；`sameReviewTarget` 同清单+同指纹（含清单顺序无关、指纹变化、缺文件、空清单、无上轮）；`transcriptOf` 全文按序拼接；**漂移即失效**（报告头 + 状态行 + 索引后缀三处标注）；**全文落盘**（存在性 + 内容 + 缺省不落盘）；**复用记录**（`declared-reuse` 通道 + 来源标注 + 路径指向）），**25/25 通过** |
-| `tests/reviewer-deliverable.ts` + `test-results/2026-10-10-reviewer-deliverable.md` | reviewer 逻辑单元测试（**101 用例**：触发判据 A/B + 缺陷 2/3/4 + S1-1/S1-4/S1-5 + S2-2 + 风暴抑制 P0-A/P0-B/P1-A + r7- 豁免 + @review 声明通道 + INDEX 触发通道列）+ 落盘结果**101/101 通过**（含输入包组包窗口过滤/结构化提取/指纹漂移检出 8 条）——运行 `tsx --tsconfig <dsh>/tsconfig.json tests/reviewer-deliverable.ts`；"通过"声明的可核产物 |
+| `tests/reviewer-deliverable.ts` + `test-results/2026-10-10-reviewer-deliverable.md` | reviewer 逻辑单元测试（**103 用例**：触发判据 A/B + 缺陷 2/3/4 + S1-1/S1-4/S1-5 + S2-2 + 风暴抑制 P0-A/P0-B/P1-A + r7- 豁免 + @review 声明通道 + INDEX 触发通道列）+ 落盘结果**103/103 通过**（含输入包组包窗口过滤/结构化提取/指纹漂移检出 8 条）——运行 `tsx --tsconfig <dsh>/tsconfig.json tests/reviewer-deliverable.ts`；"通过"声明的可核产物 |
 
 ## 运行测试 / 刷新 L1 基线（**唯一推荐入口**）
 
@@ -33,9 +33,9 @@ bash dsh-adapter/run-tests.sh --dsh <checkout>     # 指定 dsh checkout（默�
 
 | 套件 | 断言数 | 关注点 |
 |---|---|---|
-| `l1-seat` | 67 | 座位机制（会话作用域 section）+ 字符门 + 门触发与告警可见性 + 静态回归守卫 |
+| `l1-seat` | 70 | 座位机制（会话作用域 section）+ 字符门 + 门触发与告警可见性 + 静态回归守卫 |
 | `l1-invariants` | 126 | L1 义务不变量（关键词 + 定义级 + 依赖闭包）+ **第 H 组证据新鲜度门** |
-| `reviewer-deliverable` | 101 | 触发判据/声明解析/组包/指纹/漂移/复用等纯逻辑 |
+| `reviewer-deliverable` | 103 | 触发判据/声明解析/组包/指纹/漂移/复用等纯逻辑 |
 | `reviewer-decision-gates` | 25 | 四项裁决（漂移即失效 / 同目标复用 / auto 间隔 / 全文落盘） |
 
 **何时必须跑**（内核维护要求，见 `docs/08 §7`）：**L1 注入面 = ① `METHODOLOGY.md §0–§1` + ② `knowledge/review-lessons.md` 的 `## 基层` 段 + ③ `univedge-l1-inject.ts` 内的确认纪律块（`CONFIRM_DISCIPLINE`，随 §0–§1 一起拼入 L1）**——三者任一改动后必须重跑；
