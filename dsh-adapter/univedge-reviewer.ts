@@ -3,12 +3,19 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync, sta
 import { isAbsolute, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 import { join, dirname } from 'node:path'
-import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport, extractTaskName, extractConclusion, appendReviewIndex, REVIEW_DIR, hasQuietDirective, hasForceDirective, allArtifactsUnchanged, shouldCooldown, contentHash, scanTurnDeclarations, transcriptOf } from './reviewer-shared.ts'
+import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport, extractTaskName, extractConclusion, appendReviewIndex, REVIEW_DIR, hasQuietDirective, hasForceDirective, allArtifactsUnchanged, shouldCooldown, contentHash, scanTurnDeclarations, transcriptOf, selectArtifacts, ARTIFACT_CAP, isUserAuthored } from './reviewer-shared.ts'
 
-/** 诊断日志（临时，定位后移除）。 */
+/** 用户文本白名单（R7 第十一轮 S0-1）：实现见 `reviewer-shared.isUserAuthored`（**单一事实来源**）。
+ *  本文件 re-export 以保持既有引用稳定；四个扫描面（任务描述 / quiet / force / 声明）共用同一判据。
+ *  合并理由：此前 shared 的声明扫描内联了同一判据 → "同库两套口径"的跨文件再现（与第九轮 S0-1 同型）。 */
+export { isUserAuthored }
+
+/** 诊断日志。路径可用 UNIVEDGE_REVIEWER_LOG 覆盖（R7 第十一轮 S0-2：此前硬编码，
+ *  而消费方 review-declare.sh 假定可覆盖 → 假按钮，测试也无法隔离日志）。 */
 function diag(...args: any[]): void {
   try {
-    appendFileSync('/tmp/univedge-reviewer.log', `[${new Date().toISOString()}] ${args.map(String).join(' ')}\n`)
+    const logPath = process.env.UNIVEDGE_REVIEWER_LOG ?? '/tmp/univedge-reviewer.log'
+    appendFileSync(logPath, `[${new Date().toISOString()}] ${args.map(String).join(' ')}\n`)
   } catch { /* ignore */ }
 }
 
@@ -176,8 +183,7 @@ export function extractReviewInput(session: any, startSeq = 0, endSeq = Number.M
       // R7 第十轮 S1-3：**按 source.kind 排除子代理回执**——回执不是指令，且实测本单元的任务描述
       // 曾被取成 "Background subagent … finished …"（recent-user 回落时命中回执）。
       // 口径与 reviewer-shared.ts 的声明/quiet 扫描一致（同一代码库不得两套口径）。
-      const kind = ev.data?.source?.kind
-      if (kind === 'subagent-report' || kind === 'subagent-settled') continue
+      if (!isUserAuthored(ev)) continue
       const content = ev.data?.content ?? []
       const txt = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('')
       // R7 第五轮 S0-3：**按触发轮窗口取任务描述**——原实现取会话首条 user/message，
@@ -239,17 +245,14 @@ export function extractReviewInput(session: any, startSeq = 0, endSeq = Number.M
   // 仅对"推断出的"额外路径设上限，并在返回值里报告未入列者（宁审勿漏 + 显式化）。
   const declaredSet = new Set(declaredNorm)
   const declaredPresent = existing.filter((p) => declaredSet.has(p))
-  let inferred = existing.filter((p) => !declaredSet.has(p))
-  // R7 第七轮 S1-4：无声明（auto 通道）时**按最近写入排序**——原实现按发现顺序，长会话里前 12 项
-  // 全是早前任务的旧文件，本次真正交付物反而落到 dropped（且因此没有指纹 → 漂移复检对它失效）。
-  if (declaredNorm.length === 0) {
-    inferred = [...inferred].sort((a, b) => (candidateSeq.get(b) ?? -1) - (candidateSeq.get(a) ?? -1))
-  }
-  const room = Math.max(0, 12 - declaredPresent.length)
-  const picked = [...declaredPresent, ...inferred.slice(0, room)]
+  const inferred = existing.filter((p) => !declaredSet.has(p))
+  // R7 第七轮 S1-4 + 第十一轮 S2：选择逻辑抽到 `reviewer-shared.selectArtifacts`（单一事实来源，可单测）——
+  // 优先级（低优先级：证据产物 / README / docs）→ 最近写入（原实现按发现顺序，长会话里前 12 项全是旧文件，
+  // 本次真正交付物反而落到 dropped，且因此没有指纹 → 漂移复检对它失效）。
+  const { picked, notPicked } = selectArtifacts(declaredPresent, inferred, (p) => candidateSeq.get(p) ?? -1)
   const dropped = [
     ...declaredNorm.filter((p) => !existsSync(p)).map((p) => `${p}（声明了但文件不存在）`),
-    ...inferred.slice(room).map((p) => `${p}（超出 12 项上限，未入列）`),
+    ...notPicked.map((p) => `${p}（超出 ${ARTIFACT_CAP} 项上限，未入列）`),
   ]
   const fingerprints: Record<string, string> = {}
   for (const p of picked) {
@@ -323,7 +326,7 @@ function turnHasQuietDirective(session: any, startSeq: number, endSeq: number): 
     if (ev.type !== 'user/message' && ev.type !== 'assistant/message') continue
     // R7 第五轮 S2-3：排除子代理回执来源——评估者报告逐字引述 quiet 字面量时不应对主会话生效
     const kind = ev.data?.source?.kind
-    if (ev.type === 'user/message' && (kind === 'subagent-report' || kind === 'subagent-settled')) continue
+    if (ev.type === 'user/message' && !isUserAuthored(ev)) continue
     const msg = ev.data?.message ?? ev.data
     const content = msg?.content ?? []
     const txt = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('')
@@ -339,7 +342,7 @@ function turnHasForceDirective(session: any, startSeq: number, endSeq: number): 
     if (typeof ev.seq !== 'number' || ev.seq < startSeq || ev.seq > endSeq) continue
     if (ev.type !== 'user/message' && ev.type !== 'assistant/message') continue
     const kind = ev.data?.source?.kind
-    if (ev.type === 'user/message' && (kind === 'subagent-report' || kind === 'subagent-settled')) continue
+    if (ev.type === 'user/message' && !isUserAuthored(ev)) continue
     const msg = ev.data?.message ?? ev.data
     const content = msg?.content ?? []
     const txt = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('')

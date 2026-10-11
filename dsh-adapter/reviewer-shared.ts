@@ -44,6 +44,35 @@ export function isArtifactPath(p: string): boolean {
   return isProduct && !isReviewSelfOutput(p)
 }
 
+/** 输入包产物上限（R7 第十一轮 S2：原 `12` 在长会话里丢弃 18 项，含本轮的行为定义源）。 */
+export const ARTIFACT_CAP = 20
+
+/** 低优先级产物（**仅在超出上限时才让位**，绝不清空输入包）：
+ *  证据产物（每次测试重写）、README（每次计数刷新）、docs/（描述"为什么这样设计"，
+ *  行为定义源在代码与规范文档里）。R7 第十一轮 S2：原实现纯按"最近写入"排序，
+ *  使同轮被重写的证据文件挤掉 `univedge-l1-inject.ts` / `reviewer-shared.ts` 这类真正要审的源文件。 */
+export function isLowPriorityArtifact(p: string): boolean {
+  return (
+    /(?:^|\/)(?:test-results|archive)\//.test(p) ||
+    /(?:^|\/)README\.md$/i.test(p) ||
+    /(?:^|\/)docs\//.test(p)
+  )
+}
+
+/** 产物选择（单一事实来源：插件与测试共用）——声明项恒入列；推断项按
+ *  「优先级 → 最近写入」排序后填满剩余名额，落选者显式回报（宁审勿漏 + 显式化）。 */
+export function selectArtifacts(
+  declaredPresent: string[],
+  inferred: string[],
+  recentFirst: (p: string) => number,
+  cap: number = ARTIFACT_CAP,
+): { picked: string[]; notPicked: string[] } {
+  const rank = (p: string): number => (isLowPriorityArtifact(p) ? 1 : 0)
+  const sorted = [...inferred].sort((a, b) => rank(a) - rank(b) || recentFirst(b) - recentFirst(a))
+  const room = Math.max(0, cap - declaredPresent.length)
+  return { picked: [...declaredPresent, ...sorted.slice(0, room)], notPicked: sorted.slice(room) }
+}
+
 /** 完成态动词+文件名（信号 B 文本模式）。 */
 export const DELIVER_WORDS = /(?:已写入|已保存到|已保存至|产物在|写入完成|已落盘)\s*(?:run\/)?[^\s"']+\.(?:md|json|txt|csv|yaml|yml)\b/i
 
@@ -298,6 +327,18 @@ export function hasReviewDeclaration(txt: string): boolean {
   return extractReviewDeclarations(txt).length > 0
 }
 
+/** 用户文本白名单（R7 第十一轮 S0-1，**单一事实来源**）：只有 kind === 'user'（或缺失=旧日志）才算"人发的文本"。
+ *  此前黑名单只排 subagent-report/settled，实测漏掉 `agent-instructions`（6 条）与 `plugin`（3 条）——
+ *  后果：① 任务描述被取成 AGENTS.md 的 system-reminder（2188 字符，评估者拿到错误任务）；
+ *  ② quiet / force 扫描会把**注入文本**里的 `--no-review` / `--force-review` 字面量当真
+ *  （METHODOLOGY §1.7 正含这些字面量）→ 静默吞掉本应发生的审查。
+ *  **四个扫描面（任务描述 / quiet / force / 声明）一律经本函数判定**：合并前声明扫描在本模块内联了
+ *  同一判据，属"同库两套口径"的跨文件再现（与 R7 第九轮 S0-1 同型），故下沉至此（依赖方向 univedge-reviewer → shared）。 */
+export function isUserAuthored(ev: any): boolean {
+  const kind = ev?.data?.source?.kind
+  return kind === undefined || kind === null || kind === 'user'
+}
+
 /** 事件级扫描：turn 窗口内 user/assistant 文本中的 @review 声明路径（P1 声明通道）。
  * 与 hasQuietDirective 同构（扫描同一类事件），独立函数便于单测。 */
 export function scanTurnDeclarations(events: any[], startSeq: number, endSeq: number): string[] {
@@ -305,11 +346,8 @@ export function scanTurnDeclarations(events: any[], startSeq: number, endSeq: nu
   for (const ev of events) {
     if (typeof ev.seq !== 'number' || ev.seq < startSeq || ev.seq > endSeq) continue
     if (ev.type !== 'user/message' && ev.type !== 'assistant/message') continue
-    // R7 第五轮 S0-1：**排除子代理回执来源**——评估者报告回到主会话时是 `user/message`，
-    // 其 source.kind 为 subagent-report / subagent-settled；报告在审查"@review 机制"时必然引述该词，
-    // 若计入则每轮审查都会触发下一轮（无界放大，且绕过冷却/hash）。
-    const kind = ev.data?.source?.kind
-    if (ev.type === 'user/message' && (kind === 'subagent-report' || kind === 'subagent-settled')) continue
+    // R7 第十一轮 S0-1：经共享白名单判定（本轮合并——此前本处内联了与 univedge-reviewer 相同的判据）
+    if (ev.type === 'user/message' && !isUserAuthored(ev)) continue
     const msg = ev.data?.message ?? ev.data
     const content = msg?.content ?? []
     const txt = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('')

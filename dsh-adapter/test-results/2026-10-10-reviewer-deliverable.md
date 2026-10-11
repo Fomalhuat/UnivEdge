@@ -91,6 +91,15 @@ S0 问题清单……
 | 输入包：不再塞入早前轮的旧任务文件（handoff-bc） | false | false | S1-5 | ✅ |
 | 输入包：不再塞入早前轮的审查风暴文件 | false | false | S1-5 | ✅ |
 | 输入包：无声明路径时保留兜底（含早前轮文件，不把输入包清空） | true | true | S1-5 | ✅ |
+| 上限：24 项候选按上限封顶（原 12 → 实测丢弃 18 项） | 20 | 20 | S2 | ✅ |
+| 上限：低优先级（证据/文档/README）全部让位 | true | true | S2 | ✅ |
+| 上限：落选者显式回报（不再静默丢弃） | 4 | 4 | S2 | ✅ |
+| 上限：行为定义源全数入列 | true | true | S2 | ✅ |
+| 上限：被声明的低优先级文件不被上限挤掉 | true | true | S2 | ✅ |
+| 选择器：低优先级即便更新也让位于行为定义源 | /a/sub-old.ts | /a/sub-old.ts | S2 | ✅ |
+| 选择器：同优先级内按最近写入取 | /a/sub-new.ts | /a/sub-new.ts | S2 | ✅ |
+| 选择器：落选者进 notPicked（供显式回报） | /a/sub-old.ts | /a/sub-old.ts | S2 | ✅ |
+| 低优先级判定：证据/文档/README 命中，源码与知识库不命中 | true,true,true,true,false,false | true,true,true,true,false,false | S2 | ✅ |
 | 输入包：窗口内未声明、仅经 file_path 给出的 .md 必须入列（锁结构化提取） | true | true | S1-9 | ✅ |
 | 输入包：为该产物记录指纹（size/mtime/sha256） | string | string | S0-1 | ✅ |
 | 指纹：文件内容变化即检出（组包后改写可被判为漂移） | true | true | S0-1 | ✅ |
@@ -104,17 +113,21 @@ S0 问题清单……
 | 声明解析：讨论里引述真实路径但无 @review → 不构成声明 | 0 | 0 | S0-1 | ✅ |
 | 声明解析：通配符不是路径 | 0 | 0 | S0-1 | ✅ |
 | 声明解析：非 ASCII（中文）路径必须被解析 | 1 | 1 | S0-1 | ✅ |
-| 声明：相对路径按 session cwd 解析（不依赖 process.cwd） | /tmp/cwdrel-mYTi94/dsh-adapter/x.ts | /tmp/cwdrel-mYTi94/dsh-adapter/x.ts | S0-1 | ✅ |
+| 声明：相对路径按 session cwd 解析（不依赖 process.cwd） | /tmp/cwdrel-hcikVK/dsh-adapter/x.ts | /tmp/cwdrel-hcikVK/dsh-adapter/x.ts | S0-1 | ✅ |
 | 声明：解析成功后不再出现在 dropped | 0 | 0 | S0-1 | ✅ |
 | 声明：相对路径也被记录指纹 | string | string | S0-1 | ✅ |
 | 声明解析：含空格的中文路径不会被截断成子串 | false | false | S0-1 | ✅ |
 | 声明扫描：子代理回执内的 @review 被排除、assistant 声明保留 | /data/home/hanwu/UnivEdge/METHODOLOGY.md | /data/home/hanwu/UnivEdge/METHODOLOGY.md | S0-1 | ✅ |
 | 组包：13 项声明路径全部入列（不截断） | 13 | 13 | S0-2 | ✅ |
 | 组包：未入列候选显式报告（此处为空） | 0 | 0 | S0-2 | ✅ |
-| 组包（auto 通道）：最近写入的产物排在前面并入列 | /data/home/hanwu/UnivEdge/dsh-adapter/README.md | /data/home/hanwu/UnivEdge/dsh-adapter/README.md | S1-4 | ✅ |
+| 组包（auto 通道）：行为定义源优先于低优先级产物 | /data/home/hanwu/UnivEdge/AGENTS.md | /data/home/hanwu/UnivEdge/AGENTS.md | S1-4/S2 | ✅ |
+| 组包（auto 通道）：名额未受限时低优先级照常入列（不因优先级被丢） | 2 | 2 | S2 | ✅ |
 | 输入包（auto）：相对路径的 .ts 源码能入列（原被白名单+startsWith 排除） | true | true | S1-6 | ✅ |
 | 组包：任务描述取自触发轮（非会话首条 L1 文本） | true | true | S0-3 | ✅ |
 | 组包：任务描述来源标注为 trigger-turn | trigger-turn | trigger-turn | S0-3 | ✅ |
+| 组包：agent-instructions 注入不被选为任务描述 | false | false | S0-1 | ✅ |
+| 组包：注入存在时回落到真实用户长消息 | 请评估本轮交付（证据门单元）并给出提交建议 | 请评估本轮交付（证据门单元）并给出提交建议 | S0-1 | ✅ |
+| 声明扫描：注入来源（agent-instructions/plugin）中的 @review 不计入 |  |  | S0-1 | ✅ |
 | 组包：回执不被选为任务描述（S1-3 修） | false | false | S1-3 | ✅ |
 | 组包：无可回落长消息时如实标注低信息量（trigger-turn-short） | trigger-turn-short | trigger-turn-short | S1-3 | ✅ |
 | 组包：触发轮短回复（"可以"）→ 回落取最近长消息 | true | true | S1-3 | ✅ |
@@ -122,4 +135,4 @@ S0 问题清单……
 | 报告：组包后产物被改写 → 结论标失效（机制判定，2026-10-10 裁决 1 收紧） | true | true | S1-4b | ✅ |
 | 报告：状态行显式标注已失效 | true | true | S1-4b | ✅ |
 
-**103/103 通过, 0 失败**
+**116/116 通过, 0 失败**

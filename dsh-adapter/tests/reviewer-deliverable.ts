@@ -14,7 +14,7 @@
  *  - 显式审查点（2026-08-31 framework-redesign 方向 1）：@review 声明提取（文本级）+ 事件级扫描
  */
 import { extractReviewInput, fingerprint, persistReport } from '../univedge-reviewer'
-import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport, isReviewSelfOutput, extractTaskName, extractConclusion, reviewIndexPath, extractReviewDeclarations } from '../reviewer-shared'
+import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport, isReviewSelfOutput, extractTaskName, extractConclusion, reviewIndexPath, extractReviewDeclarations, selectArtifacts, isLowPriorityArtifact } from '../reviewer-shared'
 
 let pass = 0
 let fail = 0
@@ -227,6 +227,50 @@ import { extractReviewDeclarations, scanTurnDeclarations } from '../reviewer-sha
   rmSync(fixtureRoot, { recursive: true, force: true })
 }
 
+// ---------- 输入包：上限与优先级（R7 第十一轮 S2） ----------
+// 缺陷：纯"最近写入"排序 + 上限 12 → 长会话里同轮重写的证据/文档挤掉行为定义源
+// （实测丢弃 18 项，含 univedge-l1-inject.ts、reviewer-shared.ts）。修：上限 20 + 低优先级让位 + 落选者显式回报。
+{
+  const fx = mkdtempSync(join(tmpdir(), 'capfix-'))
+  for (const d of ['docs', 'test-results', 'archive']) mkdirSync(join(fx, d), { recursive: true })
+  const mk = (seq: number, type: string, data: any) => ({ seq, type, data })
+  const evs: any[] = [mk(1, 'user/message', { content: [{ type: 'text', text: '任务' }] })]
+  const subs: string[] = []
+  let seq = 10
+  for (let i = 1; i <= 20; i++) {
+    const f = `${fx}/sub-${String(i).padStart(2, '0')}.ts`
+    writeFileSync(f, `// ${i}`); subs.push(f)
+    evs.push(mk(seq++, 'tool/call', { name: 'write', arguments: JSON.stringify({ file_path: f }) }))
+  }
+  const lows = [`${fx}/docs/low-doc.md`, `${fx}/README.md`, `${fx}/test-results/low-ev.md`, `${fx}/archive/low-arch.md`]
+  for (const f of lows) { writeFileSync(f, 'x'); evs.push(mk(seq++, 'tool/call', { name: 'write', arguments: JSON.stringify({ file_path: f }) })) }
+  evs.push(mk(seq, 'assistant/message', { message: { content: [{ type: 'text', text: '完成' }] } }))
+  const sess = { header: { cwd: fx }, events: evs }
+  const r = extractReviewInput(sess, 10, seq, [])
+  check('上限：24 项候选按上限封顶（原 12 → 实测丢弃 18 项）', r.artifacts.length, 20, 'S2')
+  check('上限：低优先级（证据/文档/README）全部让位', lows.every((p) => !r.artifacts.includes(p)), true, 'S2')
+  check('上限：落选者显式回报（不再静默丢弃）', r.dropped.filter((d) => d.includes('未入列')).length, 4, 'S2')
+  check('上限：行为定义源全数入列', subs.every((p) => r.artifacts.includes(p)), true, 'S2')
+  // 声明项**必然**入列（即便属低优先级）：声明是生成者的显式裁决，优先级不得覆盖它
+  const r2 = extractReviewInput(sess, 10, seq, [`${fx}/docs/low-doc.md`])
+  check('上限：被声明的低优先级文件不被上限挤掉', r2.artifacts.includes(`${fx}/docs/low-doc.md`), true, 'S2')
+  rmSync(fx, { recursive: true, force: true })
+}
+
+// ---------- 产物选择器（纯函数，插件与测试共用同一事实来源） ----------
+{
+  const at = (m: Map<string, number>) => (p: string) => m.get(p) ?? -1
+  const m1 = new Map([['/a/sub-new.ts', 9], ['/a/sub-old.ts', 1], ['/a/docs/d.md', 99]])
+  check('选择器：低优先级即便更新也让位于行为定义源',
+    selectArtifacts([], ['/a/sub-old.ts', '/a/docs/d.md'], at(m1), 1).picked, ['/a/sub-old.ts'], 'S2')
+  const two = selectArtifacts([], ['/a/sub-old.ts', '/a/sub-new.ts'], at(m1), 1)
+  check('选择器：同优先级内按最近写入取', two.picked, ['/a/sub-new.ts'], 'S2')
+  check('选择器：落选者进 notPicked（供显式回报）', two.notPicked, ['/a/sub-old.ts'], 'S2')
+  check('低优先级判定：证据/文档/README 命中，源码与知识库不命中',
+    ['/a/docs/x.md', '/a/README.md', '/a/test-results/x.md', '/a/archive/x.md', '/a/dsh-adapter/univedge-reviewer.ts', '/a/knowledge/review-lessons.md'].map(isLowPriorityArtifact),
+    [true, true, true, true, false, false], 'S2')
+}
+
 // ---------- 输入包：结构化参数提取的正向断言（R7 第四轮 S1-9） ----------
 // 原 4 条断言只锁"窗口过滤"：`mine` 走 declaredPaths、`.ts` 又不在结构化白名单内，
 // 故把 parsedArgs 整段删掉仍会全绿（“测过≠测对”）。此处补一条**只能由结构化提取产生**的断言。
@@ -324,13 +368,16 @@ check('声明解析：含空格的中文路径不会被截断成子串',
   check('组包：13 项声明路径全部入列（不截断）', r13.artifacts.length, 13, 'S0-2')
   check('组包：未入列候选显式报告（此处为空）', r13.dropped.length, 0, 'S0-2')
 
-  // R7 第七轮 S1-4：无声明（auto 通道）时按**最近写入**取，不再被早前任务文件占满
+  // R7 第七轮 S1-4：无声明（auto 通道）时按**最近写入**取，不再被早前任务文件占满；
+  // R7 第十一轮 S2 追加**优先级**键（低优先级 = README/docs/证据产物）——名额受限时让位，
+  // **未受限时照常入列**（故本 fixture 两项都在，只是顺序变了：行为定义源在前）。
   const evs3 = [
     { seq: 10, type: 'tool/call', data: { name: 'write', arguments: JSON.stringify({ file_path: `${repoRoot}/AGENTS.md` }) } },
     { seq: 900, type: 'tool/call', data: { name: 'write', arguments: JSON.stringify({ file_path: `${repoRoot}/dsh-adapter/README.md` }) } },
   ]
   const ra = extractReviewInput({ header: { cwd: repoRoot }, events: evs3 }, 800, 950, [])
-  check('组包（auto 通道）：最近写入的产物排在前面并入列', ra.artifacts[0], `${repoRoot}/dsh-adapter/README.md`, 'S1-4')
+  check('组包（auto 通道）：行为定义源优先于低优先级产物', ra.artifacts[0], `${repoRoot}/AGENTS.md`, 'S1-4/S2')
+  check('组包（auto 通道）：名额未受限时低优先级照常入列（不因优先级被丢）', ra.artifacts.length, 2, 'S2')
   // R7 第八轮 S1-6：源码交付物与相对路径必须能进 auto 通道输入包
   const fx = mkdtempSync(join(tmpdir(), 'extfix-'))
   mkdirSync(join(fx, 'dsh-adapter/tests'), { recursive: true })
@@ -363,6 +410,22 @@ check('声明解析：含空格的中文路径不会被截断成子串',
     { seq: 55, type: 'user/message', data: { source: { kind: 'subagent-settled' }, content: [{ type: 'text', text: 'Background subagent xyz finished and will do no further work unless you send it more.' }] } },
     { seq: 60, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: '可以' }] } },
   ]
+  // R7 第十一轮 S0-1：agent-instructions / plugin 注入同样不得充当"用户文本"（白名单收紧后的回归断言）
+  const evs5c = [
+    { seq: 1, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: '请评估本轮交付（证据门单元）并给出提交建议' }] } },
+    { seq: 55, type: 'user/message', data: { source: { kind: 'agent-instructions' }, content: [{ type: 'text', text: '<system-reminder>Updated instructions from: AGENTS.md …（2188 字符的注入）</system-reminder>' }] } },
+    { seq: 56, type: 'user/message', data: { source: { kind: 'plugin' }, content: [{ type: 'text', text: '插件注入的长文本，含 --no-review 字面量，不得被当作指令' }] } },
+    { seq: 60, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: '可以' }] } },
+  ]
+  const rinj = extractReviewInput({ header: { cwd: repoRootOf(import.meta.url) }, events: evs5c }, 60, 60, [])
+  check('组包：agent-instructions 注入不被选为任务描述', rinj.task.startsWith('<system-reminder>'), false, 'S0-1')
+  check('组包：注入存在时回落到真实用户长消息', rinj.task, '请评估本轮交付（证据门单元）并给出提交建议', 'S0-1')
+  const injEvs = [
+    { seq: 1, type: 'user/message', data: { source: { kind: 'agent-instructions' }, content: [{ type: 'text', text: '@review docs/08-kernel-maintenance-workflow.md' }] } },
+    { seq: 2, type: 'user/message', data: { source: { kind: 'plugin' }, content: [{ type: 'text', text: '@review dsh-adapter/README.md' }] } },
+  ]
+  check('声明扫描：注入来源（agent-instructions/plugin）中的 @review 不计入', scanTurnDeclarations(injEvs, 0, 9), [], 'S0-1')
+
   const rsub = extractReviewInput({ header: { cwd: repoRootOf(import.meta.url) }, events: evs5b }, 60, 60, [])
   check('组包：回执不被选为任务描述（S1-3 修）', rsub.task.startsWith('Background subagent'), false, 'S1-3')
   check('组包：无可回落长消息时如实标注低信息量（trigger-turn-short）', rsub.taskSource, 'trigger-turn-short', 'S1-3')

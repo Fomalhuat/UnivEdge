@@ -107,6 +107,9 @@ printf '%s\n' "------------------------------------------------------------"
 for suite in "${SUITES[@]}"; do
   [ -f "tests/$suite.ts" ] || { printf '%-28s %s\n' "$suite" "✖ 源文件缺失"; failed=1; continue; }
   out="test-results/${DATE_PREFIX}-${suite}.md"
+  # 隔离测试日志（R7 第十一轮 S0-2）：插件的 diag 现在支持 UNIVEDGE_REVIEWER_LOG 覆盖，
+  # 测试运行写临时日志，不再把 /tmp/univedge-reviewer.log 推进（否则 review-declare.sh 的基线会被测试推进）。
+  export UNIVEDGE_REVIEWER_LOG="${TEST_REVIEW_LOG:-/tmp/univedge-reviewer-test.log}"
   if [ "$suite" = "l1-invariants" ] && [ "$UPDATE_BASELINE" = "1" ]; then
     UNIVEDGE_UPDATE_L1_BASELINE=1 "$TSX" --tsconfig "$TS_CONFIG" "tests/$suite.ts" > "$out" 2>&1
   else
@@ -127,24 +130,26 @@ done
 # 于是同一文件里并存 94/94 与 93 也照样通过。现改为：README 中出现的**所有** `<N>/<N> 通过`
 # 必须恰好等于本轮四套的计数集合（多一个、少一个都报）。
 fresh=""
-for suite in "${SUITES[@]}"; do
+for suite in "${SUITES[@]}" review-declare; do
   full=$(grep -o '[0-9]*/[0-9]* 通过' "test-results/${DATE_PREFIX}-${suite}.md" 2>/dev/null | tail -1)
   [ -z "$full" ] && continue
   fresh="$fresh $full"
   bare="${full%%/*}"; fresh="$fresh $bare"   # 裸计数也算合法出现形式
 done
 # 同时覆盖套件表里的**裸计数**行（| \`suite\` | N | ），第九轮 S1-2 指出仅查 "N/N 通过" 会漏掉这里
-# 扫描面 = README + `run/*/contract.md`（R7 第十轮 S1-1：只扫 README 会漏掉契约里的陈旧判据）
-CONTRACT_DOCS="$(ls "$ROOT"/run/*/contract.md 2>/dev/null)"
+# 扫描面 = README + **当前单元契约**（最新 mtime 的那一份）。R7 第十轮 S1-1 要求把契约纳入扫描面；
+# 第十二轮修正：**全部** run/*/contract.md 会把已结题的单元契约也算进来——那些计数是**当时的**记录，
+# 追溯改写等于篡改审计留痕，且会让本检查长期假红、被当噪声忽略。故改为只强制"当前单元"。
+CONTRACT_DOCS="$(ls -t "$ROOT"/run/*/contract.md 2>/dev/null | head -1)"
 doc_counts="$( { grep -o '[0-9]*/[0-9]* 通过' README.md 2>/dev/null; \
   [ -n "$CONTRACT_DOCS" ] && grep -oh '[0-9]*/[0-9]* 通过' $CONTRACT_DOCS 2>/dev/null; \
-  for suite in "${SUITES[@]}"; do sed -nE "s/^\| \`?${suite}\`? \| ([0-9]+) \|.*/\1/p" README.md 2>/dev/null; done; } | sort -u | tr '\n' ' ')"
+  for suite in "${SUITES[@]}" review-declare.sh; do sed -nE "s/^\| \`?${suite}\`? \| ([0-9]+) \|.*/\1/p" README.md 2>/dev/null; done; } | sort -u | tr '\n' ' ')"
 missing=""
 for c in $fresh; do case " $doc_counts " in *" $c "*) ;; *) missing="$missing $c";; esac; done
 extra=""
 for c in $doc_counts; do case " $fresh " in *" $c "*) ;; *) extra="$extra $c";; esac; done
 if [ -n "$missing$extra" ]; then
-  echo "⚠ 文档计数不一致（README + run/*/contract.md）：缺少${missing:- 无}；多出/过期${extra:- 无}"
+  echo "⚠ 文档计数不一致（README + 当前单元契约：${CONTRACT_DOCS:-无}）：缺少${missing:- 无}；多出/过期${extra:- 无}"
   echo "   本轮实测：$fresh"
   echo "   依据：'文档计数落后于代码'同类第 4 次复发（R7 第九轮 S1-2：存在性检查漏掉并存矛盾）。"
   echo
@@ -162,15 +167,24 @@ envfile="test-results/${DATE_PREFIX}-env.md"
   echo "- UnivEdge HEAD: $(cd "$ROOT" && git log -1 --format='%h %ci' 2>/dev/null || echo '?')"
   echo "- 工作树: $(cd "$ROOT" && [ -z "$(git status --porcelain 2>/dev/null)" ] && echo 干净 || echo '有未提交改动')"
   echo
-  echo "> 四份证据文件由同一次运行产生；本文件记录该次运行的环境（证据文件本身不重跑不会变）。"
+  echo "> 五份证据文件由同一次运行产生；本文件记录该次运行的环境（证据文件本身不重跑不会变）。"
 } > "$envfile"
 echo "▸ 环境记录: $envfile"
+# ---- 第五项：声明生成器自验证（R7 第十一轮 S1-1：新工具须有自验证用例并登记） ----
+selftest_out="test-results/${DATE_PREFIX}-review-declare.md"
+if bash review-declare.sh --self-test > "$selftest_out" 2>&1; then
+  printf '%-28s %s\n' "review-declare self-test" "✅ $(tail -1 "$selftest_out")  → $selftest_out"
+else
+  printf '%-28s %s\n' "review-declare self-test" "❌ $(tail -1 "$selftest_out")  → $selftest_out"
+  failed=1
+fi
+
 echo
 if [ $UPDATE_BASELINE = "1" ]; then
   echo "▸ 已刷新基线：test-results/l1-baseline.json（记得随证据一起提交）"
 fi
 if [ $failed -eq 0 ]; then
-  echo "✅ 全部通过。提示：本脚本保证四份证据出自**同一次运行**；它无法验证"这次运行发生在最后一次编辑之后"——"
+  echo "✅ 全部通过。提示：本脚本保证五份证据出自**同一次运行**；它无法验证"这次运行发生在最后一次编辑之后"——"
   echo "   请自行确认提交前未再改动源码（改了就要重跑）。"
   exit 0
 else
