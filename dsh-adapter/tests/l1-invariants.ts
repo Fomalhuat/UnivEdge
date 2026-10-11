@@ -22,7 +22,7 @@
  */
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
-import { readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { readL1 } from '../univedge-l1-inject.ts'
 
@@ -214,6 +214,43 @@ const G: string[] = [
 ]
 for (const s of G) duty('结构', `层级完整：${s}`, s, l1)
 
+// ---------- H. 证据新鲜度门（2026-10-10 加固） ----------
+// 为什么按 **L1 文本本身** 而不是输入文件整文做指纹：
+//   L1 = METHODOLOGY §0–§1 + review-lessons `## 基层` 两个**切片**；整文件指纹会因切片外的改动
+//   （版本头、§2+、分歧日志）产生**假警报**（2026-10-10 实测：review-lessons 只加了分歧日志行，L1 未变却报不一致）。
+// 为什么基线单独存 JSON 而不是读落盘的 .md：
+//   用法是 `tsx tests/l1-invariants.ts > test-results/xxx.md`，shell 会在**测试开始前截断**该文件——
+//   若基线取自它，每次都会被读成空 → 门形同虚设。故基线写到独立的 `test-results/l1-baseline.json`
+//   （由测试自己写，不经重定向）。
+// 行为：L1 文本变化且未刷新基线 → **测试失败**并打印刷新命令（`bash dsh-adapter/run-tests.sh --update-l1-baseline`；
+// 等价的底层开关是环境变量 UNIVEDGE_UPDATE_L1_BASELINE=1，供脚本内部使用）。
+{
+  const l1Hash = createHash('sha256').update(l1).digest('hex').slice(0, 16)
+  const baselinePath = join(repoRoot, 'dsh-adapter', 'test-results', 'l1-baseline.json')  // 刷新：bash dsh-adapter/run-tests.sh --update-l1-baseline
+  const shouldUpdate = process.env.UNIVEDGE_UPDATE_L1_BASELINE === '1'
+  let freshNote = ''
+  if (shouldUpdate || !existsSync(baselinePath)) {
+    writeFileSync(baselinePath, `${JSON.stringify({
+      note: 'L1 义务不变量基线的内容指纹（按 L1 文本本身，非输入整文）；L1 变化后请运行：bash dsh-adapter/run-tests.sh --update-l1-baseline（底层等价开关 UNIVEDGE_L1…等见 run-tests.sh）',
+      l1Chars: l1.length,
+      l1Lines: l1.split('\n').length,
+      l1Sha256_16: l1Hash,
+      updatedAt: new Date().toISOString(),
+    }, null, 2)}\n`, 'utf8')
+    freshNote = shouldUpdate ? '已刷新（UNIVEDGE_UPDATE_L1_BASELINE=1）' : '基线不存在 → 已创建'
+  } else {
+    const base = JSON.parse(readFileSync(baselinePath, 'utf8')) as { l1Sha256_16?: string; l1Chars?: number }
+    if (base.l1Sha256_16 === l1Hash) {
+      freshNote = `一致（${l1Hash}，${base.l1Chars} 字符）`
+    } else {
+      freshNote = `**已过期**：基线 ${base.l1Sha256_16}（${base.l1Chars} 字符）≠ 现值 ${l1Hash}（${l1.length} 字符）`
+    }
+  }
+  const fresh = freshNote.startsWith('一致') || freshNote.startsWith('已刷新') || freshNote.startsWith('基线不存在')
+  fresh ? pass++ : fail++
+  rows.push(`| H·证据新鲜度 | L1 内容指纹与基线一致（证据未过期） | \`${l1Hash}\` ${freshNote}${fresh ? '' : '——请运行 `bash dsh-adapter/run-tests.sh --update-l1-baseline` 并提交 test-results/l1-baseline.json（见 docs/08 §7）'} | ${fresh ? '✅' : '❌'} |`)
+}
+
 // ---------- 输出 ----------
 // R7 第五轮 S2-4：落盘时记录**输入文件指纹**——否则知识库改动（如 review-lessons 的基层段）
 // 会让基线静默过期而不自知。指纹算法与 reviewer 插件同源（size/mtime/sha256前12）。
@@ -235,7 +272,8 @@ const lines = [
   '- 判据层次：关键词存在性 + **定义级**（信号名与其判据文字同时在场）+ **依赖闭包**（保留文本依赖的术语其定义亦须在场）',
   `- L1 实测规模：${l1.length} 字符 / ${l1.split('\n').length} 行`,
   '- 边界：本测试是代理判据——保证"义务与判据文字仍在 L1 中"，**不**保证模型遵守，**不**覆盖同义改写的弱化',
-  '- **基线输入指纹**（改动这些文件会使本基线过期，需重跑）：',
+  '- **基线 = L1 内容指纹**（`test-results/l1-baseline.json`；L1 变化后运行 `bash dsh-adapter/run-tests.sh --update-l1-baseline` 刷新）',
+  '- 以下为**输入整文件**指纹（仅供参考，**不**作为判据——切片外改动不应触发过期）：',
   ...inputFingerprints,
   '',
   '| 组 | 义务 | 断言文本 | 结果 |',

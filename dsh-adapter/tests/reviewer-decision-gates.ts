@@ -100,6 +100,14 @@ rmSync(dir, { recursive: true, force: true })
 rmSync(rootA, { recursive: true, force: true })
 rmSync(rootB, { recursive: true, force: true })
 
+// 落盘头部由**测试自己产出**（此前提交版是人工添加的 6 行头部，测试不产出 → 永远无法复现；
+// 修法：把头部移进测试，随代码一起演进。见 run/review/handoff-reviewer-overreview.md §六）
+console.log('# 测试落盘：reviewer-decision-gates\n')
+console.log(`- 日期：${new Date().toISOString().slice(0, 10)}`)
+console.log('- 命令：`tsx --tsconfig <dsh>/tsconfig.json tests/reviewer-decision-gates.ts`')
+console.log('- 场景：审查四项裁决实现（漂移即失效 / 同目标复用 + --force-review / auto 最小间隔常量 / 报告全文落盘）')
+console.log('- 依据：`run/review/handoff-reviewer-overreview.md` §六 待裁决 1/2/4（裁决 3 为触发路径参数，见源码 `AUTO_MIN_GAP_MIN` 注释）')
+console.log('')
 console.log('| 用例 | 期望 | 实际 | 依据 | 结果 |')
 console.log('|---|---|---|---|---|')
 for (const r of results) console.log(r)

@@ -1,6 +1,6 @@
 # reviewer 逻辑单元测试结果（shared 模块）
 
-- 日期：2026-10-10
+- 日期：2026-10-11
 - 命令：`tsx --tsconfig <dsh>/tsconfig.json tests/reviewer-deliverable.ts`
 - 覆盖：触发判据（A/B 层）+ 缺陷 2/3/4 + S1-1/S1-4/S1-5 + S2-2 + INDEX 创建/追加/并发 + 共享模块单一事实来源（S1-2）+ 风暴抑制（quiet/冷却/hash/r7-）+ @review 声明通道
 
@@ -107,8 +107,10 @@ S0 问题清单……
 | 组包：13 项声明路径全部入列（不截断） | 13 | 13 | S0-2 | ✅ |
 | 组包：未入列候选显式报告（此处为空） | 0 | 0 | S0-2 | ✅ |
 | 组包（auto 通道）：最近写入的产物排在前面并入列 | /data/home/hanwu/UnivEdge/dsh-adapter/README.md | /data/home/hanwu/UnivEdge/dsh-adapter/README.md | S1-4 | ✅ |
+| 输入包（auto）：相对路径的 .ts 源码能入列（原被白名单+startsWith 排除） | true | true | S1-6 | ✅ |
 | 组包：任务描述取自触发轮（非会话首条 L1 文本） | true | true | S0-3 | ✅ |
 | 组包：任务描述来源标注为 trigger-turn | trigger-turn | trigger-turn | S0-3 | ✅ |
-| 报告：组包后产物被改写 → 自动标注漂移（机制检出） | true | true | S1-4b | ✅ |
+| 报告：组包后产物被改写 → 结论标失效（机制判定，2026-10-10 裁决 1 收紧） | true | true | S1-4b | ✅ |
+| 报告：状态行显式标注已失效 | true | true | S1-4b | ✅ |
 
-**92/92 通过, 0 失败**
+**94/94 通过, 0 失败**

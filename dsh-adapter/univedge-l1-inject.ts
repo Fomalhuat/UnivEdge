@@ -1,5 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
-import { readFileSync, existsSync, appendFileSync } from 'node:fs'
+import { readFileSync, existsSync, appendFileSync, statSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { join, dirname } from 'node:path'
 
 export const name = 'univedge-l1-inject'
@@ -123,6 +124,31 @@ export function readL1(root: string): string {
  * section 文本求值：每次提示组装时从磁盘重读（保持"与源同步"，与旧版每步注入的行为一致）。
  * 读取失败时降级为可读告警而非抛错——provider 抛错会波及整次组装，等于让方法论层拖垮会话。
  */
+/**
+ * L1 证据新鲜度门的**运行时触达路径**（R7 第八轮 S1-5）：
+ * 与尺寸门同构——测试若只被手动运行，门就不会自己响（该缺陷 2026-10-10 已被裁决为必须下沉）。
+ * 这里在**每次提示组装**求值 L1 时，顺带比对 `dsh-adapter/test-results/l1-baseline.json` 记录的基线指纹：
+ *   - 基线缺失（生产环境/未建基线）→ **不告警**（门只对维护者有意义，不打扰普通用户）；
+ *   - 基线存在但与现值不符 → 在 section 前追加一行告警，提示刷新证据（agent 与用户当轮可见）。
+ */
+let baselineCache: { path: string; mtimeMs: number; sha: string | undefined } | undefined
+
+function baselineSha(root: string): string | undefined {
+  const path = join(root, 'dsh-adapter', 'test-results', 'l1-baseline.json')
+  try {
+    const st = statSync(path)
+    if (baselineCache !== undefined && baselineCache.path === path && baselineCache.mtimeMs === st.mtimeMs) {
+      return baselineCache.sha
+    }
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as { l1Sha256_16?: string }
+    baselineCache = { path, mtimeMs: st.mtimeMs, sha: parsed.l1Sha256_16 }
+    return parsed.l1Sha256_16
+  } catch {
+    baselineCache = undefined
+    return undefined
+  }
+}
+
 /** 已告警的键集合：**按 `workspace + 尺寸 + 门限` 去重**——同一尺寸只告警一次避免每请求刷屏；
  * 用集合而非单一变量，避免同进程多 agent / 多 workspace 时互相抑制（R7 第四轮 S2-5）。 */
 const warned = new Set<string>()
@@ -143,6 +169,18 @@ function render(root: string): string {
       // 使 agent 与用户当轮即见（门因此真正"迫使显式决定"），日志留痕供审计。
       return `> ⚠ UnivEdge L1 尺寸超预算：${text.length} 字符 > 门限 ${limit}（政策余量 +30%）。`
         + `请显式决定：上调 L1_CHAR_LIMIT / 瘦身（预案见 run/l1-trim/plan.md）。\n\n${text}`
+    }
+    // 证据新鲜度（与尺寸门同构的运行时触达）：基线存在且不符 → 告警一行
+    const expected = baselineSha(root)
+    const actual = createHash('sha256').update(text).digest('hex').slice(0, 16)
+    if (expected !== undefined && expected !== actual) {
+      const key = `baseline:${root}:${expected}:${actual}`
+      if (!warned.has(key)) {
+        warned.add(key)
+        diag('WARN l1 evidence stale', `baseline=${expected}`, `current=${actual}`)
+      }
+      return `> ⚠ UnivEdge L1 与 ` + '`test-results/l1-baseline.json`' + ` 记录的基线不一致（基线 ${expected} ≠ 现值 ${actual}）：内核文档已改但验证证据未刷新。`
+        + `请运行 \`bash dsh-adapter/run-tests.sh --update-l1-baseline\` 并提交基线 + 证据。\n\n${text}`
     }
     return text
   } catch (error) {

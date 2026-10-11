@@ -1,5 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync, statSync } from 'node:fs'
+import { isAbsolute, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 import { join, dirname } from 'node:path'
 import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport, extractTaskName, extractConclusion, appendReviewIndex, REVIEW_DIR, hasQuietDirective, hasForceDirective, allArtifactsUnchanged, shouldCooldown, contentHash, scanTurnDeclarations, transcriptOf } from './reviewer-shared.ts'
@@ -118,6 +119,23 @@ function findUnivEdgeRoot(start: string | undefined): string | undefined {
  * 评估者对"已不存在的状态"出结论且**不报错**——属 B4 型验证失效。
  * 组包时留档 + 报告落盘前复检，把"窗口内漂移"变成报告里的显式标注。
  */
+/**
+ * 交付物路径判据（R7 第八轮 S1-6 修）：原实现有两处结构性排除 ——
+ *  ① 扩展名白名单只有 `md|txt|json|yaml|yml|log|csv`（**无 `.ts/.sh`**，源码交付物永远进不了输入包）；
+ *  ② 结构化路径要求 `startsWith(cwd)`（**相对路径永不匹配**，`l1-baseline.json` 之类即因此漏掉）。
+ * 现改为：扩展名集合放宽到常见代码/文本/配置类型；相对路径按 session cwd 解析后判断是否落在 workspace 内。
+ */
+const DELIVERABLE_EXT_RE = /\.(?:md|markdown|txt|json|jsonl|yaml|yml|toml|ini|cfg|log|csv|dat|ts|tsx|js|mjs|cjs|py|sh|bash|zsh|rs|go|c|cc|cpp|h|hpp|f90|tex|bib|html|css|sql|ipynb)$/i
+
+/** 相对路径按 cwd 解析；返回规范化绝对路径；不落在 workspace 内、或在 node_modules 内、或扩展名不像交付物 → undefined。 */
+function insideWorkspace(cwd: string, p: string): string | undefined {
+  if (!p || /node_modules/.test(p)) return undefined
+  const norm = resolve(isAbsolute(p) ? p : resolve(cwd, p))
+  const root = resolve(cwd)
+  if (norm !== root && !norm.startsWith(root.endsWith('/') ? root : `${root}/`)) return undefined
+  return DELIVERABLE_EXT_RE.test(norm) ? norm : undefined
+}
+
 export function fingerprint(path: string): string | undefined {
   try {
     const st = statSync(path)
@@ -172,10 +190,11 @@ export function extractReviewInput(session: any, startSeq = 0, endSeq = Number.M
       if (parsedArgs && typeof parsedArgs === 'object') {
         for (const key of ['file_path', 'path', 'notebook_path', 'target_file', 'output_path']) {
           const v = (parsedArgs as any)[key]
-          if (typeof v === 'string' && v.startsWith(cwd) && !/node_modules/.test(v)
-            && /\.(md|txt|json|yaml|yml|log|csv)$/i.test(v)) {
-            artifacts.add(v)
-            candidateSeq.set(v, Math.max(candidateSeq.get(v) ?? -1, seq))
+          if (typeof v !== 'string') continue
+          const norm = insideWorkspace(cwd, v)
+          if (norm !== undefined) {
+            artifacts.add(norm)
+            candidateSeq.set(norm, Math.max(candidateSeq.get(norm) ?? -1, seq))
           }
         }
       }

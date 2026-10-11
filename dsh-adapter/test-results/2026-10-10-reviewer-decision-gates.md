@@ -1,8 +1,9 @@
-# 测试落盘：reviewer-decision-gates（2026-10-10）
+# 测试落盘：reviewer-decision-gates
 
-- 运行：tsx --tsconfig <dsh>/tsconfig.json tests/reviewer-decision-gates.ts
+- 日期：2026-10-11
+- 命令：`tsx --tsconfig <dsh>/tsconfig.json tests/reviewer-decision-gates.ts`
 - 场景：审查四项裁决实现（漂移即失效 / 同目标复用 + --force-review / auto 最小间隔常量 / 报告全文落盘）
-- 依据：run/review/handoff-reviewer-overreview.md §6 待裁决 1/2/4（裁决 3 为触发路径参数，见源码 AUTO_MIN_GAP_MIN 注释）
+- 依据：`run/review/handoff-reviewer-overreview.md` §六 待裁决 1/2/4（裁决 3 为触发路径参数，见源码 `AUTO_MIN_GAP_MIN` 注释）
 
 | 用例 | 期望 | 实际 | 依据 | 结果 |
 |---|---|---|---|---|
