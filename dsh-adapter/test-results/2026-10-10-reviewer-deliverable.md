@@ -103,6 +103,11 @@ S0 问题清单……
 | 声明解析：纯讨论（无路径）不构成声明 | 0 | 0 | S0-1 | ✅ |
 | 声明解析：讨论里引述真实路径但无 @review → 不构成声明 | 0 | 0 | S0-1 | ✅ |
 | 声明解析：通配符不是路径 | 0 | 0 | S0-1 | ✅ |
+| 声明解析：非 ASCII（中文）路径必须被解析 | 1 | 1 | S0-1 | ✅ |
+| 声明：相对路径按 session cwd 解析（不依赖 process.cwd） | /tmp/cwdrel-YWIzht/dsh-adapter/x.ts | /tmp/cwdrel-YWIzht/dsh-adapter/x.ts | S0-1 | ✅ |
+| 声明：解析成功后不再出现在 dropped | 0 | 0 | S0-1 | ✅ |
+| 声明：相对路径也被记录指纹 | string | string | S0-1 | ✅ |
+| 声明解析：含空格的中文路径不会被截断成子串 | false | false | S0-1 | ✅ |
 | 声明扫描：子代理回执内的 @review 被排除、assistant 声明保留 | /data/home/hanwu/UnivEdge/METHODOLOGY.md | /data/home/hanwu/UnivEdge/METHODOLOGY.md | S0-1 | ✅ |
 | 组包：13 项声明路径全部入列（不截断） | 13 | 13 | S0-2 | ✅ |
 | 组包：未入列候选显式报告（此处为空） | 0 | 0 | S0-2 | ✅ |
@@ -110,7 +115,9 @@ S0 问题清单……
 | 输入包（auto）：相对路径的 .ts 源码能入列（原被白名单+startsWith 排除） | true | true | S1-6 | ✅ |
 | 组包：任务描述取自触发轮（非会话首条 L1 文本） | true | true | S0-3 | ✅ |
 | 组包：任务描述来源标注为 trigger-turn | trigger-turn | trigger-turn | S0-3 | ✅ |
+| 组包：触发轮短回复（"可以"）→ 回落取最近长消息 | true | true | S1-3 | ✅ |
+| 组包：来源标注为 recent-user | recent-user | recent-user | S1-3 | ✅ |
 | 报告：组包后产物被改写 → 结论标失效（机制判定，2026-10-10 裁决 1 收紧） | true | true | S1-4b | ✅ |
 | 报告：状态行显式标注已失效 | true | true | S1-4b | ✅ |
 
-**94/94 通过, 0 失败**
+**101/101 通过, 0 失败**

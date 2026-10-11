@@ -127,6 +127,17 @@ function findUnivEdgeRoot(start: string | undefined): string | undefined {
  */
 const DELIVERABLE_EXT_RE = /\.(?:md|markdown|txt|json|jsonl|yaml|yml|toml|ini|cfg|log|csv|dat|ts|tsx|js|mjs|cjs|py|sh|bash|zsh|rs|go|c|cc|cpp|h|hpp|f90|tex|bib|html|css|sql|ipynb)$/i
 
+/**
+ * 声明路径规范化（R7 第九轮 S0-1）：**必须按 session cwd 解析，不能用 process.cwd()**。
+ * 缺陷实况：dsh 宿主进程的 cwd 是 **dsh checkout**（非工作区），相对声明路径因此被判"文件不存在"——
+ * 实测一次真实审查里 14 项声明有 13 项被静默丢弃，剩下那项 `AGENTS.md` 还被解析成了
+ * **dsh 检出仓库的同名文件**（指纹 16070B/ad0a802f vs 本仓 3828B/f8590a92，逐位不同）。
+ * 同文件的 `insideWorkspace()`（auto 通道）用 resolve(cwd,p) 是对的 → 本函数统一两者口径。
+ */
+export function normalizeDeclared(cwd: string, paths: string[]): string[] {
+  return paths.map((p) => (p && !isAbsolute(p) ? resolve(cwd || '.', p) : p))
+}
+
 /** 相对路径按 cwd 解析；返回规范化绝对路径；不落在 workspace 内、或在 node_modules 内、或扩展名不像交付物 → undefined。 */
 function insideWorkspace(cwd: string, p: string): string | undefined {
   if (!p || /node_modules/.test(p)) return undefined
@@ -149,10 +160,13 @@ export function fingerprint(path: string): string | undefined {
 export function extractReviewInput(session: any, startSeq = 0, endSeq = Number.MAX_SAFE_INTEGER, declaredPaths: string[] = []): { task: string; taskSource: string; finalReply: string; artifacts: string[]; dropped: string[]; fingerprints: Record<string, string>; snapshotAt: string } {
   let task = ''
   let taskInWindow = ''
+  const shortUserTexts: string[] = []   // 窗口外/内的短 user 消息（按 seq 逆序取最近的长文本兜底）
   let finalReply = ''
-  const artifacts = new Set<string>(declaredPaths)
-  const candidateSeq = new Map<string, number>()   // path → 最近一次出现的 seq（用于"取最近写入"兜底）
   const cwd = session?.header?.cwd ?? ''
+  // R7 第九轮 S0-1：声明路径先按 session cwd 规范化（否则 dsh 进程 cwd 下全部判为不存在）
+  const declaredNorm = normalizeDeclared(cwd, declaredPaths)
+  const artifacts = new Set<string>(declaredNorm)
+  const candidateSeq = new Map<string, number>()   // path → 最近一次出现的 seq（用于"取最近写入"兜底）
   const evts = session?.events ?? []
   for (const ev of evts) {
     if (ev.type === 'user/message') {
@@ -162,8 +176,10 @@ export function extractReviewInput(session: any, startSeq = 0, endSeq = Number.M
       // 那往往是 L1 注入全文（实测：输入包"任务描述"就是 2026-08-29 的 L1 方法论文本），
       // 与本次审查对象无关。窗口内取不到时回落到首条（并标注来源）。
       const inWindow = typeof ev.seq === 'number' && ev.seq >= startSeq && ev.seq <= endSeq
-      if (inWindow && !taskInWindow && txt.trim()) taskInWindow = txt.trim().slice(0, 4000)
-      if (!task && txt.trim()) task = txt.trim().slice(0, 4000)
+      const t = txt.trim()
+      if (inWindow && !taskInWindow && t) taskInWindow = t.slice(0, 4000)
+      if (!task && t) task = t.slice(0, 4000)
+      if (t.length >= 20) shortUserTexts.unshift(t.slice(0, 4000))   // 逆序累积：最近的在前
     } else if (ev.type === 'assistant/message' && typeof ev.seq === 'number' && ev.seq >= startSeq && ev.seq <= endSeq) {
       // 只取触发轮区间内的回复（多轮任务中不取旧轮内容）
       const msg = ev.data?.message
@@ -213,18 +229,18 @@ export function extractReviewInput(session: any, startSeq = 0, endSeq = Number.M
   const existing = [...artifacts].filter((p) => existsSync(p))
   // R7 第五轮 S0-2：**声明路径不截断**（原实现 `slice(0,12)` 会静默丢弃第 13 项起的声明路径）；
   // 仅对"推断出的"额外路径设上限，并在返回值里报告未入列者（宁审勿漏 + 显式化）。
-  const declaredSet = new Set(declaredPaths)
+  const declaredSet = new Set(declaredNorm)
   const declaredPresent = existing.filter((p) => declaredSet.has(p))
   let inferred = existing.filter((p) => !declaredSet.has(p))
   // R7 第七轮 S1-4：无声明（auto 通道）时**按最近写入排序**——原实现按发现顺序，长会话里前 12 项
   // 全是早前任务的旧文件，本次真正交付物反而落到 dropped（且因此没有指纹 → 漂移复检对它失效）。
-  if (declaredPaths.length === 0) {
+  if (declaredNorm.length === 0) {
     inferred = [...inferred].sort((a, b) => (candidateSeq.get(b) ?? -1) - (candidateSeq.get(a) ?? -1))
   }
   const room = Math.max(0, 12 - declaredPresent.length)
   const picked = [...declaredPresent, ...inferred.slice(0, room)]
   const dropped = [
-    ...declaredPaths.filter((p) => !existsSync(p)).map((p) => `${p}（声明了但文件不存在）`),
+    ...declaredNorm.filter((p) => !existsSync(p)).map((p) => `${p}（声明了但文件不存在）`),
     ...inferred.slice(room).map((p) => `${p}（超出 12 项上限，未入列）`),
   ]
   const fingerprints: Record<string, string> = {}
@@ -232,9 +248,17 @@ export function extractReviewInput(session: any, startSeq = 0, endSeq = Number.M
     const f = fingerprint(p)
     if (f !== undefined) fingerprints[p] = f
   }
+  // R7 第九轮 S2-1：未入列者对生成者可见（此前只写进输入包，声明方无法自查）
+  if (dropped.length > 0) diag('input package dropped', dropped.length, 'item(s):', dropped.slice(0, 6).join(' | '))
+  // R7 第九轮 S1-3：任务描述**最小信息量**——触发轮内常只有一句短回复（实测"可以"，2 字符），
+  // 使 §5.1 输入包自包含性不成立。故：窗口内文本过短时，回落取最近的**长 user 消息**（≥20 字符），
+  // 并如实标注来源，供评估者判断该描述是否可信。
+  const MIN_TASK_CHARS = 20
+  const useRecent = (taskInWindow?.length ?? 0) < MIN_TASK_CHARS && shortUserTexts.length > 0
   return {
-    task: taskInWindow || task,
-    taskSource: taskInWindow ? 'trigger-turn' : (task ? 'session-first' : 'none'),
+    task: useRecent ? shortUserTexts[0] : (taskInWindow || task),
+    taskSource: useRecent ? 'recent-user'
+      : taskInWindow ? 'trigger-turn' : (task ? 'session-first' : 'none'),
     finalReply, artifacts: picked, dropped, fingerprints, snapshotAt: new Date().toISOString(),
   }
 }
@@ -469,7 +493,8 @@ export function apply(ctx: Context): void {
       // 裁决 2（2026-10-10）：**同清单 + 同指纹 → 复用上轮结论**（写显式记录，非静默跳过）。
       // 依据：账本 §2.1 显示 6 轮中多轮在审"同一快照"；`--force-review` / `review:force` 保留强制重审出口。
       const prev = lastReview.get(session.id)
-      if (!turnHasForceDirective(session, startSeq, endSeq) && sameReviewTarget(declared, prev)) {
+      const declaredForReuse = normalizeDeclared(session?.header?.cwd ?? '', declared)
+      if (!turnHasForceDirective(session, startSeq, endSeq) && sameReviewTarget(declaredForReuse, prev)) {
         const reuseRoot = findUnivEdgeRoot(session.header?.cwd)
         if (reuseRoot) {
           diag('turn', turn, `declared target unchanged since ${prev?.childId} → reuse last conclusion (use --force-review to force)`)
@@ -611,7 +636,7 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
   // "同清单 + 同指纹 → 复用上轮结论"；auto 通道不记（其对象由嗅探推断，稳定性不足）。
   if (declaredPaths.length > 0) {
     lastReview.set(session.id, {
-      paths: [...declaredPaths],
+      paths: normalizeDeclared(session?.header?.cwd ?? '', declaredPaths),
       fingerprints: input.fingerprints,
       childId: String(childId),
       at: Date.now(),

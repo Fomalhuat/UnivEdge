@@ -73,20 +73,6 @@ echo "▸ 证据前缀     : $DATE_PREFIX"
 [ "$UPDATE_BASELINE" = "1" ] && echo "▸ L1 基线      : 将刷新（UNIVEDGE_UPDATE_L1_BASELINE=1）"
 echo
 
-# ---- 文档计数一致性（同类缺陷已复发三次：README 的用例数落后于代码 → 一道轻量检查） ----
-# 判据：README 的测试表里必须能找到本轮各套件的 "<N>/<N> 通过" 字样（不匹配即提示更新 README）。
-count_mismatch=""
-for suite in "${SUITES[@]}"; do
-  cnt=$(grep -o '[0-9]*/[0-9]* 通过' "test-results/${DATE_PREFIX}-${suite}.md" 2>/dev/null | tail -1)
-  [ -z "$cnt" ] && continue
-  grep -qF "$cnt" README.md 2>/dev/null || count_mismatch="$count_mismatch ${suite}(${cnt})"
-done
-if [ -n "$count_mismatch" ]; then
-  echo "⚠ 文档计数可能落后（README 中未找到：$count_mismatch）——请同步 dsh-adapter/README.md 的测试表。"
-  echo "   依据：'文档计数落后于代码'同类缺陷已复发三次（R7 第八轮 S1-1）。"
-  echo
-fi
-
 # ---- 契约提醒（R7 第八轮 S1-2：同一缺陷已第三次复发 → 按 §1.5 用门控而非教训库拦） ----
 # 判据：内核邻近文件有未提交改动，而 run/ 下**没有任何**契约比这些改动更新 → 提示先落契约（§1.2）。
 # 取"内核邻近的**源码类**改动"：限定路径 + 排除证据目录（test-results/ 常被重跑，且重命名项会带旧 mtime）。
@@ -135,6 +121,31 @@ for suite in "${SUITES[@]}"; do
     failed=1
   fi
 done
+
+# ---- 文档计数**一致性**（不只是"存在性"）----
+# R7 第八轮 S1-1 → 第九轮 S1-2：原检查问"README 里有没有这个串"（存在即过），
+# 于是同一文件里并存 94/94 与 93 也照样通过。现改为：README 中出现的**所有** `<N>/<N> 通过`
+# 必须恰好等于本轮四套的计数集合（多一个、少一个都报）。
+fresh=""
+for suite in "${SUITES[@]}"; do
+  full=$(grep -o '[0-9]*/[0-9]* 通过' "test-results/${DATE_PREFIX}-${suite}.md" 2>/dev/null | tail -1)
+  [ -z "$full" ] && continue
+  fresh="$fresh $full"
+  bare="${full%%/*}"; fresh="$fresh $bare"   # 裸计数也算合法出现形式
+done
+# 同时覆盖套件表里的**裸计数**行（| \`suite\` | N | ），第九轮 S1-2 指出仅查 "N/N 通过" 会漏掉这里
+doc_counts="$( { grep -o '[0-9]*/[0-9]* 通过' README.md 2>/dev/null; \
+  for suite in "${SUITES[@]}"; do sed -nE "s/^\| \`?${suite}\`? \| ([0-9]+) \|.*/\1/p" README.md 2>/dev/null; done; } | sort -u | tr '\n' ' ')"
+missing=""
+for c in $fresh; do case " $doc_counts " in *" $c "*) ;; *) missing="$missing $c";; esac; done
+extra=""
+for c in $doc_counts; do case " $fresh " in *" $c "*) ;; *) extra="$extra $c";; esac; done
+if [ -n "$missing$extra" ]; then
+  echo "⚠ 文档计数不一致（README）：缺少${missing:- 无}；多出/过期${extra:- 无}"
+  echo "   本轮实测：$fresh"
+  echo "   依据：'文档计数落后于代码'同类第 4 次复发（R7 第九轮 S1-2：存在性检查漏掉并存矛盾）。"
+  echo
+fi
 
 echo
 if [ $UPDATE_BASELINE = "1" ]; then

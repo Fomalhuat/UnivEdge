@@ -209,7 +209,9 @@ const PATH_EXT = 'md|markdown|json|jsonl|txt|csv|yaml|yml|log|dat|ts|tsx|js|mjs|
 /** 路径 token 的**源串**（注意：一律现用现建 `new RegExp(..., 'gi')`，绝不在模块级持有带 `g` 的正则
  *  并用 `.test()` —— 那次 `lastIndex` 跨调用残留导致同一输入连续调用结果翻转，
  *  属 2026-10-10 引入的真实回归，R7 第七轮 S0-1 已构造性复现）。 */
-const PATH_TOKEN_SRC = `[\\w./\\-]+\\.(?:${PATH_EXT})\\b`
+// \p{L}\p{N} 覆盖 CJK 等非 ASCII 路径字符（R7 第九轮：此前 `\w` 只含 [A-Za-z0-9_]，
+// 中文文件名（如 docs/08-内核维护工作流.md）会被静默丢弃）；使用 `u` 标志启用 Unicode 属性转义。
+const PATH_TOKEN_SRC = `[\\p{L}\\p{N}._/\\-]+\\.(?:${PATH_EXT})\\b`
 
 /** 行首的声明头（仅用于判定"是否需要把后续行纳入同一声明块"）。 */
 const DECL_LINE_RE = /^[ \t>*\-]*@review\b/i
@@ -217,7 +219,7 @@ const DECL_LINE_RE = /^[ \t>*\-]*@review\b/i
 /** 取一行的路径 token（每次新建正则，无状态）。 */
 function pathsInLine(line: string): string[] {
   const cleaned = line.replace(/[`"']/g, '')
-  return cleaned.match(new RegExp(PATH_TOKEN_SRC, 'gi')) ?? []
+  return cleaned.match(new RegExp(PATH_TOKEN_SRC, 'giu')) ?? []
 }
 
 /** `@review` 之后的剩余文字是否**只由路径与连接词构成**（= 纯声明）。
@@ -228,7 +230,7 @@ const SEPARATOR_ONLY_RE = /^[\s、，,。；;：:与和及或\-\*>·（）()【�
 const COMMENT_TAIL_RE = /^\s*[（(【\[「『—–-]/
 function isPureDeclarationTail(tail: string): boolean {
   const withoutPaths = tail
-    .replace(new RegExp(PATH_TOKEN_SRC, 'gi'), '')
+    .replace(new RegExp(PATH_TOKEN_SRC, 'giu'), '')
     .replace(new RegExp(REVIEW_DECLARE_RE.source, 'gi'), '')   // 同一行的后续 @review 不算散文
   // 纯路径清单（只剩分隔符）→ 声明；以括号/破折号开头的简注 → 仍视为声明（如"（本轮交付）"）；
   // 其余（出现散文词，如"的语义""这个案例"）→ 判为讨论/引述，不触发。

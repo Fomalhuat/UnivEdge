@@ -17,7 +17,7 @@
 | `tests/l1-invariants.ts` + `test-results/2026-10-10-l1-invariants.md` + `test-results/l1-baseline.json` | **L1 义务不变量测试**（126 断言：§0 状态机与产物格式 + §1.1–§1.6 全部操作义务 + §1.7 操作面与**定义级判据**（信号名+判据文字同在场）+ **依赖闭包**（capability/regression/retired/查表不判断/实质发现/20 次）+ 基层五根因 + 确认纪律 4 类 + 层级结构），**126/126 通过**（基线，2026-10-10）。计数规则：**一条断言 = 一个义务**（括号子项不合并）。**证据新鲜度门**（第 H 组）：基线 = **L1 文本本身**的 sha256（存 `test-results/l1-baseline.json`，独立文件——因为 `> test-results/xxx.md` 会在测试开始前截断目标，若基线取自它则门形同虚设）；L1 变化而基线未刷新 → 测试失败并打印刷新命令（`UNIVEDGE_UPDATE_L1_BASELINE=1`）。**按 L1 切片而非输入整文**做指纹：切片外改动（版本头 / §2+ / 分歧日志）不误报（2026-10-10 实测）。**约定**：结果文件名用**任务日期**，头部"日期"为**生成日期**；"逐字节可复现"是同日属性（跨天后仅首行日期不同）。用途：任何 L1 改写（压缩/搬移/重写）必须保持全绿；边界：代理判据，不保证模型遵守、不覆盖同义改写弱化 |
 | `test-runner.ts` + `test.patch.yml` | 测试专用：headless 主任务后不退出，轮询审查报告生成再退出（验证 reviewer 用） |
 | `tests/reviewer-decision-gates.ts` + `test-results/2026-10-10-reviewer-decision-gates.md` | **四项裁决实现测试**（25 用例：`--force-review`/`review:force` 识别 + 误判排除；`sameReviewTarget` 同清单+同指纹（含清单顺序无关、指纹变化、缺文件、空清单、无上轮）；`transcriptOf` 全文按序拼接；**漂移即失效**（报告头 + 状态行 + 索引后缀三处标注）；**全文落盘**（存在性 + 内容 + 缺省不落盘）；**复用记录**（`declared-reuse` 通道 + 来源标注 + 路径指向）），**25/25 通过** |
-| `tests/reviewer-deliverable.ts` + `test-results/2026-10-10-reviewer-deliverable.md` | reviewer 逻辑单元测试（**94 用例**：触发判据 A/B + 缺陷 2/3/4 + S1-1/S1-4/S1-5 + S2-2 + 风暴抑制 P0-A/P0-B/P1-A + r7- 豁免 + @review 声明通道 + INDEX 触发通道列）+ 落盘结果**94/94 通过**（含输入包组包窗口过滤/结构化提取/指纹漂移检出 8 条）——运行 `tsx --tsconfig <dsh>/tsconfig.json tests/reviewer-deliverable.ts`；"通过"声明的可核产物 |
+| `tests/reviewer-deliverable.ts` + `test-results/2026-10-10-reviewer-deliverable.md` | reviewer 逻辑单元测试（**101 用例**：触发判据 A/B + 缺陷 2/3/4 + S1-1/S1-4/S1-5 + S2-2 + 风暴抑制 P0-A/P0-B/P1-A + r7- 豁免 + @review 声明通道 + INDEX 触发通道列）+ 落盘结果**101/101 通过**（含输入包组包窗口过滤/结构化提取/指纹漂移检出 8 条）——运行 `tsx --tsconfig <dsh>/tsconfig.json tests/reviewer-deliverable.ts`；"通过"声明的可核产物 |
 
 ## 运行测试 / 刷新 L1 基线（**唯一推荐入口**）
 
@@ -35,7 +35,7 @@ bash dsh-adapter/run-tests.sh --dsh <checkout>     # 指定 dsh checkout（默�
 |---|---|---|
 | `l1-seat` | 67 | 座位机制（会话作用域 section）+ 字符门 + 门触发与告警可见性 + 静态回归守卫 |
 | `l1-invariants` | 126 | L1 义务不变量（关键词 + 定义级 + 依赖闭包）+ **第 H 组证据新鲜度门** |
-| `reviewer-deliverable` | 93 | 触发判据/声明解析/组包/指纹/漂移/复用等纯逻辑 |
+| `reviewer-deliverable` | 101 | 触发判据/声明解析/组包/指纹/漂移/复用等纯逻辑 |
 | `reviewer-decision-gates` | 25 | 四项裁决（漂移即失效 / 同目标复用 / auto 间隔 / 全文落盘） |
 
 **何时必须跑**（内核维护要求，见 `docs/08 §7`）：**L1 注入面 = ① `METHODOLOGY.md §0–§1` + ② `knowledge/review-lessons.md` 的 `## 基层` 段 + ③ `univedge-l1-inject.ts` 内的确认纪律块（`CONFIRM_DISCIPLINE`，随 §0–§1 一起拼入 L1）**——三者任一改动后必须重跑；
@@ -63,8 +63,8 @@ bash dsh-adapter/run-tests.sh --dsh <checkout>     # 指定 dsh checkout（默�
 - **可核性（2026-10-10 更正）**：系统提示**是落盘的**——位于 `request/header` 事件的 `data.header.system`（换座位后实测该字段 14387 字符（2026-10-10 17:54 快照；其后因 harness 段变化另有 14817）、含 L1 段；旧机制时期 6292 字符、不含 L1）。早前"系统提示不落盘"的判定**已作废**：其依据是"never infer the working directory…"这一特征串在某历史会话 0 命中，而该会话的系统提示里本就没有这个串（4135 字符，属不同时期/启动方式），且未枚举事件类型——属**代理特征串 + 单样本外推**（教训 B1-5，已沉淀）。
   - `analyze_session.py` 的 L1 指标因此为**三源取或**：① 系统提示记录（首选，最强）＞ ② 旧版会话日志注入标记 ＞ ③ 插件诊断日志 `/tmp/univedge-l1.log` 注册行（`l1 section registered session=<id> workspace=<根>`；`UNIVEDGE_L1_LOG` 可覆盖路径；它留痕的是"注册时刻/对象"这一 request/header 不记录的信息）。输出增 `L1 判定来源` 以区分来源；行为侧指标（L2 契约/自省）不受影响。
 - **L1 尺寸与预算门（2026-10-10 实测；经 R7 审查修订）**：
-  - L1 全量 **8,093 字符**（双路锚点：`readL1()` 输出 + `request/header.data.header.system` 中逐字一致的 L1 段）。
-  - **门以字符定义**：常量 `L1_CHAR_LIMIT = 10520` 定义在 `univedge-l1-inject.ts`（**单一事实来源**，测试 import 同一常量，避免两处漂移），现值余量 **+30.0%**（取值＝round(8,093 × 1.30)，**政策选择**，与 token 换算比无关）。
+  - L1 全量 **8,546 字符**（2026-10-11 实测；§1.7 增两规则后由 8,093 增至此）（双路锚点：`readL1()` 输出 + `request/header.data.header.system` 中逐字一致的 L1 段）。
+  - **门以字符定义**：常量 `L1_CHAR_LIMIT = 10520` 定义在 `univedge-l1-inject.ts`（**单一事实来源**，测试 import 同一常量，避免两处漂移），现值余量 **+23.1%**（门 10,520 / 现值 8,546；门取值为政策选择——round(8,093 × 1.30)，与 token 换算比无关）。
   - **门的触达路径（R7 第二轮 S0-1 修复）**：仓内无 CI、无 git hook、也无人调用测试——若门只设在测试里，实际语义是"下次有人手动跑测试时才报错"，与该门要防的失效模式同构。故门**下沉到注入路径**：`render()` 在**每次提示组装**求值 L1 时检查，越界即写 `/tmp/univedge-l1.log` 告警（同一尺寸只告警一次，不刷屏）；测试另有"门真的会响"实测（压低门限触发告警）。门限可用 `UNIVEDGE_L1_CHAR_LIMIT` 覆盖。
   - **token 数一律标"未标定估计"**：不同口径给出 0.22～2.39 字符每 token（全库复算：仅文本/output 0.22；文本+推理/output 2.39），跨内容类型边际比 2.2–3.4 → L1 量级估计约 **2,400–4,600 tokens，不可作判据**。R7 审查（2026-10-10）指出原实现以未标定比折算字符门，已改为字符定义（该比值现仅作量级参考）。
   - **为何需要门**（`git log` 逐 commit 重建，**口径 = §0–§1 + 基层，不含"确认纪律"块**）：08-27 4,537 → 10-10 7,691 字符（**+70%/6 周**）；另注（R7 第三轮 S2-7 更正）：确认纪律块（**402 字符**）于 2026-09-02 才加入注入器，08-27 时点不存在该块，故不宜给"全量口径的同期百分比"；两口径之差是常量 **402 字符**。各版本 commit 的 **L1 净增量**：v0.10 +606 / v0.11 +835 / v0.12 +1,290——主体是 §1.7/§1.2 的**内容**改动；文件头变更史**不在 L1 切片内**（`readL1()` 自 `## 0.` 起切片，R7 第三轮 S1-1 更正）——无门则两三个版本后无人察觉。

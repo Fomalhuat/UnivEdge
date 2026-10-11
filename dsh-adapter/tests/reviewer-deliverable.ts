@@ -26,6 +26,8 @@ function check(name: string, got: unknown, expected: unknown, ref = ''): void {
   results.push(`| ${name} | ${expected} | ${got} | ${ref} | ${ok ? '✅' : '❌'} |`)
 }
 
+const repoRootOf = (u: string): string => new URL('../../', u).pathname.replace(/\/$/, '')
+
 // ---------- 1. 触发判据（信号 A：工具层路径） ----------
 check('write run/foo.json（非 .md run/ 产物）', isArtifactPath('run/foo.json'), true, 'L0-1')
 check('write run/foo.md', isArtifactPath('run/foo.md'), true, '基础')
@@ -287,6 +289,26 @@ import { extractReviewDeclarations, scanTurnDeclarations } from '../reviewer-sha
   check('声明解析：纯讨论（无路径）不构成声明', extractReviewDeclarations('我们讨论了 `@review <路径>` 的语义与上限').length, 0, 'S0-1')
   check('声明解析：讨论里引述真实路径但无 @review → 不构成声明', extractReviewDeclarations(`审查报告已写入 /x/UnivEdge/run/review/INDEX.md`).length, 0, 'S0-1')
   check('声明解析：通配符不是路径', extractReviewDeclarations('@review test-results/*.md').length, 0, 'S0-1')
+  // R7 第九轮（自检发现）：路径正则原用 \w，只含 [A-Za-z0-9_] → **中文文件名被静默丢弃**。
+  // 本仓曾用 docs/0X-<中文>.md 命名（现已改英文），但用户项目里仍可能有非 ASCII 路径。
+  check('声明解析：非 ASCII（中文）路径必须被解析', extractReviewDeclarations('@review docs/08-内核维护工作流.md').length, 1, 'S0-1')
+  // R7 第九轮 S0-1 的回归断言：相对声明路径必须按 **session cwd** 解析（此前按 process.cwd()，
+// 生产中 dsh 宿主进程 cwd 是 dsh checkout → 13/14 声明被静默丢弃，且 AGENTS.md 被换成外仓同名文件）。
+{
+  const fx = mkdtempSync(join(tmpdir(), 'cwdrel-'))
+  mkdirSync(join(fx, 'dsh-adapter'), { recursive: true })
+  const rel = 'dsh-adapter/x.ts'
+  const abs = join(fx, rel)
+  writeFileSync(abs, 'x')
+  const r = extractReviewInput({ header: { cwd: fx }, events: [] }, 0, 9, [rel])
+  check('声明：相对路径按 session cwd 解析（不依赖 process.cwd）', r.artifacts, [abs], 'S0-1')
+  check('声明：解析成功后不再出现在 dropped', r.dropped.length, 0, 'S0-1')
+  check('声明：相对路径也被记录指纹', typeof r.fingerprints[abs], 'string', 'S0-1')
+  rmSync(fx, { recursive: true, force: true })
+}
+
+check('声明解析：含空格的中文路径不会被截断成子串',
+    extractReviewDeclarations('@review 路径/含空格 的文件.md').includes('路径/含空格'), false, 'S0-1')
 
   // (b) 子代理回执来源的 @review 不触发（否则评估者报告引述 @review → 无界放大）
   const evs = [
@@ -329,6 +351,15 @@ import { extractReviewDeclarations, scanTurnDeclarations } from '../reviewer-sha
   const rw = extractReviewInput({ header: { cwd: repoRoot }, events: evs2 }, 40, 60, [])
   check('组包：任务描述取自触发轮（非会话首条 L1 文本）', rw.task.startsWith('本轮任务'), true, 'S0-3')
   check('组包：任务描述来源标注为 trigger-turn', rw.taskSource, 'trigger-turn', 'S0-3')
+  // R7 第九轮 S1-3：触发轮内只有短回复时，任务描述回落取最近的较长 user 消息（并标注来源）
+  const evs5 = [
+    { seq: 1, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: '（会话首条：L1 方法论注入全文……）' }] } },
+    { seq: 50, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: '请评估 L1 证据门这一单元的交付并给出提交建议' }] } },
+    { seq: 60, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: '可以' }] } },
+  ]
+  const rshort = extractReviewInput({ header: { cwd: repoRootOf(import.meta.url) }, events: evs5 }, 60, 60, [])
+  check('组包：触发轮短回复（"可以"）→ 回落取最近长消息', rshort.task.startsWith('请评估 L1 证据门'), true, 'S1-3')
+  check('组包：来源标注为 recent-user', rshort.taskSource, 'recent-user', 'S1-3')
 
   // (e) 漂移标注：组包后产物被改写 → 报告正文前出现机制检出标注
   const tmpRoot = mkdtempSync(join(tmpdir(), 'drift-'))
