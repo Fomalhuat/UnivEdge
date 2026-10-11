@@ -140,16 +140,28 @@ done
 # 扫描面 = README + **当前单元契约**（最新 mtime 的那一份）。R7 第十轮 S1-1 要求把契约纳入扫描面；
 # 第十二轮修正：**全部** run/*/contract.md 会把已结题的单元契约也算进来——那些计数是**当时的**记录，
 # 追溯改写等于篡改审计留痕，且会让本检查长期假红、被当噪声忽略。故改为只强制"当前单元"。
-CONTRACT_DOCS="$(ls -t "$ROOT"/run/*/contract.md 2>/dev/null | head -1)"
+# 且以 `历史留档` 标记显式排除已结题单元——否则"碰一下旧契约"就会让它变成"当前单元"，
+# 而真正的现行契约**反而失检**（假绿，比假红更危险：这是检查自身的盲区，故由标记显式化而非靠 mtime 序）。
+CONTRACT_DOCS=""
+for c in $(ls -t "$ROOT"/run/*/contract.md 2>/dev/null); do
+  grep -q '历史留档' "$c" 2>/dev/null && continue
+  CONTRACT_DOCS="$c"; break
+done
+# R7 第十二轮（提交侧受控实验）修正：**解析面**盲区——原实现对契约用 `'[0-9]*/[0-9]* 通过'`，
+# 而契约的书写格式是**裸计数**（`70/70、126/126、…`，见 run/*/contract.md 的"五套检查"行），
+# 故该模式对契约 **0 命中** → 契约侧扫描面**空转**（"README + 当前单元契约"名不副实）。
+# 受控实验：把现行契约的 116/116 改成 115/115 后，本检查仍报"全部通过"（假绿）。
+# 改用**等值反向引用** `\b([0-9]+)/\1\b`：计数天然是 N/N 等值形式，且不误抓路径片段
+# （实测契约中命中恰为 5 个计数；而 `[0-9]*/[0-9]*` 会抓到 `/` 等噪声）。
 doc_counts="$( { grep -o '[0-9]*/[0-9]* 通过' README.md 2>/dev/null; \
-  [ -n "$CONTRACT_DOCS" ] && grep -oh '[0-9]*/[0-9]* 通过' $CONTRACT_DOCS 2>/dev/null; \
+  [ -n "$CONTRACT_DOCS" ] && grep -ohE '\b([0-9]+)/\1\b' $CONTRACT_DOCS 2>/dev/null; \
   for suite in "${SUITES[@]}" review-declare.sh; do sed -nE "s/^\| \`?${suite}\`? \| ([0-9]+) \|.*/\1/p" README.md 2>/dev/null; done; } | sort -u | tr '\n' ' ')"
 missing=""
 for c in $fresh; do case " $doc_counts " in *" $c "*) ;; *) missing="$missing $c";; esac; done
 extra=""
 for c in $doc_counts; do case " $fresh " in *" $c "*) ;; *) extra="$extra $c";; esac; done
 if [ -n "$missing$extra" ]; then
-  echo "⚠ 文档计数不一致（README + 当前单元契约：${CONTRACT_DOCS:-无}）：缺少${missing:- 无}；多出/过期${extra:- 无}"
+  echo "⚠ 文档计数不一致（README + 当前单元契约：${CONTRACT_DOCS:-无未标记历史的契约}）：缺少${missing:- 无}；多出/过期${extra:- 无}"
   echo "   本轮实测：$fresh"
   echo "   依据：'文档计数落后于代码'同类第 4 次复发（R7 第九轮 S1-2：存在性检查漏掉并存矛盾）。"
   echo
