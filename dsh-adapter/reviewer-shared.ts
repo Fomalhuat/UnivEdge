@@ -44,6 +44,48 @@ export function isArtifactPath(p: string): boolean {
   return isProduct && !isReviewSelfOutput(p)
 }
 
+/** tool/call 的**结构化参数**取值（R7 第十八轮 S0-1）。
+ *  真实事件形状 = `{ name, callId, step, turn, arguments: <JSON 字符串> }`——**路径在 `data.arguments` 里，
+ *  `data` 层没有 `file_path`**。原实现直接解析 `ev.data` 当参数对象 → 恒 `undefined` →
+ *  `artifactPathsOfTurn()` 恒返回 `[]` → `allArtifactsUnchanged([])` 因 `!paths.length → false`
+ *  使 **P0-B hash 去重门在生产路径恒不触发**（写入门恒不触发，§3.4.1 #6 记载的第三度复发）。 */
+export function toolCallArgs(ev: any): any {
+  const d = ev?.data ?? {}
+  const raw = d.arguments
+  let parsed: any = raw
+  if (typeof raw === 'string') { try { parsed = JSON.parse(raw) } catch { parsed = undefined } }
+  if (parsed && typeof parsed === 'object') return parsed
+  // 回退：有些宿主把参数直接摊在 data 上（测试夹具/旧日志）
+  return typeof d === 'object' ? d : {}
+}
+
+/** 自动通道的"任务产出"判定（2026-10-12 用户裁决："所有审查机制都应作用于实际使用时的物理任务产出"）。
+ *  = 路径在 `run/<任务>/` 下，且不在基础设施豁免清单内。
+ *  装置改动（内核 md、docs/、dsh-adapter/、knowledge/）**不再自动触发**审查——要审装置时**主动声明**；
+ *  装置自身的自动防线是脚本门（run-tests.sh 六项 + 负控门 + 计数/新鲜度/契约门），不是评估者。
+ *  需要临时恢复"装置也自动触发"时设 `UNIVEDGE_REVIEW_APPARATUS_AUTO=1`。 */
+export const REVIEW_INFRA_DIRS = [
+  'run/review/', 'run/kernel-amendment/', 'run/anchor-apply/', 'run/physics-observation/', 'run/evidence-gate/',
+]
+export function isTaskOutput(p: string): boolean {
+  const m = String(p).replace(/\\/g, '/').match(/(?:^|\/)run\/([^/]+)(?:\/|$)/)
+  if (!m) return false
+  const seg = `run/${m[1]}/`
+  return !REVIEW_INFRA_DIRS.includes(seg)
+}
+export function apparatusAutoEnabled(): boolean {
+  return process.env.UNIVEDGE_REVIEW_APPARATUS_AUTO === '1'
+}
+/** 自动通道是否应因该路径而触发（任务产出，或显式打开了装置自动） */
+export function autoTriggerPath(p: string): boolean {
+  return isTaskOutput(p) || apparatusAutoEnabled()
+}
+
+/** 产物扩展名的**唯一来源**（R7 第十八轮 S1-1：三处白名单曾各写一份且互不一致）。
+ *  注意语义：**auto 通道的"交付物"= `run/` 产物或 `.md`**（`isArtifactPath`）——源码改动不计入，
+ *  以免维护期自审风暴；`declared` 通道不受此限（声明必审）。 */
+export const ARTIFACT_EXT_SRC = 'md|json|txt|log|csv|yaml|yml|dat|ts|sh|py'
+
 /** 输入包产物上限（R7 第十一轮 S2：原 `12` 在长会话里丢弃 18 项，含本轮的行为定义源）。 */
 export const ARTIFACT_CAP = 20
 
@@ -198,7 +240,13 @@ export function appendReviewIndex(root: string, rec: { mainId: string; childId: 
 // - P1-A quiet 指令：turn 文本含 --no-review / review:off → 跳过（用户/主 agent 细粒度控制，替代全关硬开关）
 
 /** quiet 指令判定（P1-A）：turn 内 user/assistant 文本含 --no-review 或 review:off 即跳过审查。 */
-export const QUIET_RE = /(?:--no-review|review\s*:\s*off)/i
+/** P1-A quiet 指令（R7 第十八轮修复：**行首独立指令**，不再是全文子串匹配）。
+ *  动机（实测两度静默失效）：原实现是裸子串匹配，且 assistant 文本不过滤——
+ *  ① 我在回复里**解释**该机制时引述字面量 → 该轮审查被静默跳过（含同轮声明）；
+ *  ② 注入文本/评估者报告引述同一字面量也会命中（后者靠 isUserAuthored 白名单挡住）。
+ *  现要求：该指令须**出现在行首**（允许前导空白、`>` 引用符、`- ` 列表符），
+ *  且**只在用户消息里**生效（assistant 无权静默关审）；行内引述（含行内代码）不再命中。 */
+export const QUIET_RE = /^\s*(?:>\s*)?(?:[-*]\s*)?(?:--no-review|review\s*:\s*off)\b/im
 export function hasQuietDirective(txt: string): boolean {
   return QUIET_RE.test(txt)
 }
@@ -206,7 +254,9 @@ export function hasQuietDirective(txt: string): boolean {
 /** 强制重审指令（2026-10-10 裁决 2）：`--force-review` / `review:force`。
  *  用途：declared 通道下"清单与指纹与上轮完全相同 → 复用上轮结论"（去重复用）时，
  *  仍保留显式强制重审的出口——与 `--no-review` 对称，把否决权留给用户/主 agent。 */
-export const FORCE_RE = /(?:--force-review|review\s*:\s*force)/i
+/** 裁决 2：强制重审指令。与 quiet 同构（行首独立指令 + 仅用户消息生效），
+ *  理由同上——行内引述不应改变触发行为。 */
+export const FORCE_RE = /^\s*(?:>\s*)?(?:[-*]\s*)?(?:--force-review|review\s*:\s*force)\b/im
 export function hasForceDirective(txt: string): boolean {
   return FORCE_RE.test(txt)
 }

@@ -137,8 +137,10 @@ import { join } from 'node:path'
 import { hasQuietDirective, allArtifactsUnchanged, shouldCooldown, contentHash } from '../reviewer-shared'
 {
   // P1-A quiet 指令
-  check('quiet：--no-review', hasQuietDirective('本轮仅响应 S2，--no-review'), true, 'storm-P1A')
-  check('quiet：review:off', hasQuietDirective('批量归档，review:off'), true, 'storm-P1A')
+  // R7 第十八轮：这两条原断言"**行内**出现字面量即静默"（旧语义）——正是导致两次静默失效的行为，
+  // 现改为**判别夹具**：行内引述必须**不**命中（旧实现在此会失败）。
+  check('quiet：行内引述不命中（判别夹具，旧实现会失败）', hasQuietDirective('本轮仅响应 S2，--no-review'), false, 'S0-fix')
+  check('quiet：行内引述不命中（冒号变体）', hasQuietDirective('批量归档，review:off'), false, 'S0-fix')
   check('quiet：大小写不敏感（Review: OFF）', hasQuietDirective('Review: OFF'), true, 'storm-P1A')
   check('quiet：正常回复不含', hasQuietDirective('已修订产物并落盘 run/step5/x.md'), false, 'storm-P1A')
 
@@ -319,6 +321,18 @@ import { extractReviewDeclarations, scanTurnDeclarations } from '../reviewer-sha
   check('报告取值：不把用户消息当报告', pickReportFromParent([mkMsg('user', undefined, full)], 'child-1'), '', 'S1-9')
   // 报告标志须认得 "## 1. 结论"（带序号）——完整报告正是这种标题，早先的 /##\s*结论/ 会漏
   check('报告标志：认得带序号的结论标题（## 1. 结论）', pickReport([{ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: full }] } } }]).includes('S2 建议项'), true, 'S1-9')
+}
+
+// ---------- 生产路径断言（VERIFICATION §3.4.1-6 / R7 第十五轮 S1-7） ----------
+// 构造数据只能证明"算法对构造输入成立"。本条断言取自**本仓真实产物**（仓库内已提交的 METHODOLOGY.md），
+// 即"至少一条断言锚定真实运行路径"的落地；若输入包选择逻辑把真实交付物漏掉（如本轮 docs/10 被降级挤出），
+// 这类断言才会响。
+{
+  const repoRoot0 = new URL('../../', import.meta.url).pathname.replace(/\/$/, '')
+  const real = `${repoRoot0}/METHODOLOGY.md`
+  const r = extractReviewInput({ header: { cwd: repoRoot0 }, events: [] }, 0, 9, [real])
+  check('生产路径：真实仓库产物（METHODOLOGY.md）被收入输入包', r.artifacts.includes(real), true, 'S1-7')
+  check('生产路径：真实产物被记录指纹', typeof r.fingerprints[real], 'string', 'S1-7')
 }
 
 // ---------- 产物指纹与漂移检出（R7 第四轮 S0-1） ----------

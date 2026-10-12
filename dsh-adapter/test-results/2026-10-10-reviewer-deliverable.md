@@ -60,8 +60,8 @@ S0 问题清单……
 | INDEX 通道列记录 declared/auto | true | true | S2-4 | ✅ |
 | INDEX 无 channel 字段记录缺省 auto（历史兼容） | true | true | S2-4 | ✅ |
 | 并发首写场景两条记录不丢（wx 排他 + EEXIST 回退） | 2 | 2 | S1-1 | ✅ |
-| quiet：--no-review | true | true | storm-P1A | ✅ |
-| quiet：review:off | true | true | storm-P1A | ✅ |
+| quiet：行内引述不命中（判别夹具，旧实现会失败） | false | false | S0-fix | ✅ |
+| quiet：行内引述不命中（冒号变体） | false | false | S0-fix | ✅ |
 | quiet：大小写不敏感（Review: OFF） | true | true | storm-P1A | ✅ |
 | quiet：正常回复不含 | false | false | storm-P1A | ✅ |
 | 冷却：0 次成功 → 不冷却 | false | false | storm-P0A | ✅ |
@@ -109,6 +109,8 @@ S0 问题清单……
 | 报告取值：无匹配子会话时返回空（交给子会话回落） |  |  | S1-9 | ✅ |
 | 报告取值：不把用户消息当报告 |  |  | S1-9 | ✅ |
 | 报告标志：认得带序号的结论标题（## 1. 结论） | true | true | S1-9 | ✅ |
+| 生产路径：真实仓库产物（METHODOLOGY.md）被收入输入包 | true | true | S1-7 | ✅ |
+| 生产路径：真实产物被记录指纹 | string | string | S1-7 | ✅ |
 | 指纹：文件内容变化即检出（组包后改写可被判为漂移） | true | true | S0-1 | ✅ |
 | 指纹：不存在文件返回 undefined（不抛错） | undefined | undefined | S0-1 | ✅ |
 | 声明解析：12 项散文清单（含 .ts/.py）全部解析 | 12 | 12 | S0-1 | ✅ |
@@ -120,7 +122,7 @@ S0 问题清单……
 | 声明解析：讨论里引述真实路径但无 @review → 不构成声明 | 0 | 0 | S0-1 | ✅ |
 | 声明解析：通配符不是路径 | 0 | 0 | S0-1 | ✅ |
 | 声明解析：非 ASCII（中文）路径必须被解析 | 1 | 1 | S0-1 | ✅ |
-| 声明：相对路径按 session cwd 解析（不依赖 process.cwd） | /tmp/cwdrel-btvonA/dsh-adapter/x.ts | /tmp/cwdrel-btvonA/dsh-adapter/x.ts | S0-1 | ✅ |
+| 声明：相对路径按 session cwd 解析（不依赖 process.cwd） | /tmp/cwdrel-0nSvvY/dsh-adapter/x.ts | /tmp/cwdrel-0nSvvY/dsh-adapter/x.ts | S0-1 | ✅ |
 | 声明：解析成功后不再出现在 dropped | 0 | 0 | S0-1 | ✅ |
 | 声明：相对路径也被记录指纹 | string | string | S0-1 | ✅ |
 | 声明解析：含空格的中文路径不会被截断成子串 | false | false | S0-1 | ✅ |
@@ -142,4 +144,4 @@ S0 问题清单……
 | 报告：组包后产物被改写 → 结论标失效（机制判定，2026-10-10 裁决 1 收紧） | true | true | S1-4b | ✅ |
 | 报告：状态行显式标注已失效 | true | true | S1-4b | ✅ |
 
-**123/123 通过, 0 失败**
+**125/125 通过, 0 失败**

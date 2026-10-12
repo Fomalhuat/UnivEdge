@@ -2,7 +2,7 @@
 # UnivEdge × dsh 适配层测试入口（**唯一推荐入口**——不必记 tsx / tsconfig 参数）
 #
 # 用法：
-#   bash dsh-adapter/run-tests.sh                    # 跑全部四套，证据写入 test-results/
+#   bash dsh-adapter/run-tests.sh                    # 跑全部六项检查，证据写入 test-results/
 #   bash dsh-adapter/run-tests.sh --update-l1-baseline   # L1 内容有变时刷新基线（见下）
 #   bash dsh-adapter/run-tests.sh --dsh /path/to/deepseek-harness
 #   bash dsh-adapter/run-tests.sh --date 2026-10-10   # 指定证据文件名前缀（默认沿用现有文件）
@@ -95,12 +95,16 @@ if [ -n "$dirty" ]; then
     if [ -n "$oldest_dirty" ] && [ "$c" -nt "$oldest_dirty" ]; then has_fresh_contract=1; fi
   done < <(find "$ROOT/run" -type f -name contract.md 2>/dev/null)
   if [ "$has_fresh_contract" = "0" ]; then
+    GATES="$GATES⚠ 契约提醒（§1.2）：检测到内核邻近文件有未提交改动，但 run/ 下没有比这些改动更新的任务契约。\n"
     echo "⚠ 契约提醒（§1.2）：检测到内核邻近文件有未提交改动，但 run/ 下没有比这些改动更新的任务契约。"
     echo "   请先落 run/<任务>/contract.md（目标 / DoD / 验证标准与锚点 / 工作单元边界，四行起）。"
     echo "   依据：同一缺陷已第三次复发（R7 第八轮 S1-2）——教训库拦不住流程缺失，故由入口脚本提醒。"
     echo
   fi
 fi
+# ---- 门输出落盘（R7 第十七轮 S1-6）：两个门（契约提醒 / 计数一致性）不再只打印到 stdout ----
+GATES=""
+failed_gates=0
 # ---- 逐套跑，证据落盘 ----
 failed=0
 printf '%-28s %s\n' "测试套件" "结果"
@@ -129,7 +133,7 @@ done
 # ---- 文档计数**一致性**（不只是"存在性"）----
 # R7 第八轮 S1-1 → 第九轮 S1-2：原检查问"README 里有没有这个串"（存在即过），
 # 于是同一文件里并存 94/94 与 93 也照样通过。现改为：README 中出现的**所有** `<N>/<N> 通过`
-# 必须恰好等于本轮四套的计数集合（多一个、少一个都报）。
+# 必须恰好等于本轮各套件的计数集合（多一个、少一个都报）。
 # 第十三轮修正（本次重写暴露）：`fresh` 原先把整个 `"70/70 通过"` 当作一个 token 塞进去——shell 会把它
 # 拆成 `70/70` 与 `通过` 两个词，而文档侧的旧采集恰好也产出同样的词，于是"通过"这个词**对称地**出现在两侧，
 # 掩盖了口径不一致（把两侧都改成纯数字后，缺失列表立刻报出 5 个"通过"）。现统一为**纯数字集合**。
@@ -165,7 +169,12 @@ readme_cells="$(for suite in "${SUITES[@]}" review-declare.sh; do
   sed -nE "s/^\| \`?${suite}\`? \| ([0-9]+) \|.*/\1/p" README.md 2>/dev/null; done)"
 contract_counts=""
 # 注意：`grep -o` 输出的是**整个匹配**（`70/70`），捕获组只在替换里可用 → 必须再切掉分母。
-[ -n "$CONTRACT_DOCS" ] && contract_counts="$(grep -ohE '\b([0-9]+)/\1\b' $CONTRACT_DOCS 2>/dev/null | cut -d/ -f1)"
+# 第十八轮收窄：契约里可能出现**非套件计数**的等值比例（如"六项判据全部可响"曾写成 6/6 → 被误报为过期计数）。
+# 现只采集**与套件名同行**的 N/N；这既消除该假红，又保留"契约为某一套件写的陈旧计数"这一真检查。
+if [ -n "$CONTRACT_DOCS" ]; then
+  contract_counts="$(grep -ohE '^.*(l1-seat|l1-invariants|reviewer-deliverable|reviewer-decision-gates|review-declare).*$' $CONTRACT_DOCS 2>/dev/null \
+    | grep -ohE '\b([0-9]+)/\1\b' | cut -d/ -f1)"
+fi
 doc_counts="$( { printf '%s\n' "$readme_cells"; printf '%s\n' "$contract_counts"; } | grep -v '^$' | sort -u | tr '\n' ' ')"
 echo "▸ 计数来源：README 套件表 $(printf '%s\n' "$readme_cells" | grep -c . || true) 项 · 契约 $(printf '%s\n' "$contract_counts" | grep -c . || true) 项（契约：${CONTRACT_DOCS:-无}）"
 missing=""
@@ -177,6 +186,9 @@ if [ -n "$missing$extra" ]; then
   echo "   本轮实测：$fresh"
   echo "   依据：'文档计数落后于代码'同类第 4 次复发（R7 第九轮 S1-2：存在性检查漏掉并存矛盾）。"
   echo
+  GATES="$GATES⚠ 文档计数不一致（README + 当前单元契约：${CONTRACT_DOCS:-无}）：缺少${missing:- 无}；多出/过期${extra:- 无}
+"
+  failed_gates=1   # 第十八轮：计数不一致是客观可判定的不一致 → 计入失败（不再与"✅ 全部通过"同屏并存）
 fi
 # ── 计数**位置**检测器（值无关，故新句式/新位置也拦得住——这正是"只补正则"拦不住的漏）：
 # 套件表之外出现计数claim（`N/N 通过` 或 `N 用例/断言`）→ 报警。判据不依赖数值，故不会因换写法而失效。
@@ -202,7 +214,7 @@ envfile="test-results/${DATE_PREFIX}-env.md"
   echo "- UnivEdge HEAD: $(cd "$ROOT" && git log -1 --format='%h %ci' 2>/dev/null || echo '?')"
   echo "- 工作树: $(cd "$ROOT" && [ -z "$(git status --porcelain 2>/dev/null)" ] && echo 干净 || echo '有未提交改动')"
   echo
-  echo "> 五份证据文件由同一次运行产生；本文件记录该次运行的环境（证据文件本身不重跑不会变）。"
+  echo "> 七份证据文件由同一次运行产生；本文件记录该次运行的环境（证据文件本身不重跑不会变）。"
 } > "$envfile"
 echo "▸ 环境记录: $envfile"
 # ---- 第五项：声明生成器自验证（R7 第十一轮 S1-1：新工具须有自验证用例并登记） ----
@@ -214,12 +226,27 @@ else
   failed=1
 fi
 
+# ---- 第六项：负控门（判据可响性；R7 第十七轮 S0-1 → 用户 2026-10-12 批准） ----
+nc_out="test-results/${DATE_PREFIX}-negative-control.md"
+if bash tools/negative-control.sh > "$nc_out" 2>&1; then
+  printf '%-28s %s\n' "negative-control" "✅ $(tail -1 "$nc_out")  → $nc_out"
+else
+  printf '%-28s %s\n' "negative-control" "❌ $(tail -1 "$nc_out")  → $nc_out"
+  failed=1
+fi
+
+# ---- 门输出落盘 ----
+gatefile="test-results/${DATE_PREFIX}-gates.md"
+{ echo "# 门输出（契约提醒 / 计数一致性）"; echo; echo '```'; printf '%s' "${GATES:-（无告警）}"; echo '```'; } > "$gatefile"
+echo "▸ 门输出: $gatefile"
+
 echo
 if [ $UPDATE_BASELINE = "1" ]; then
   echo "▸ 已刷新基线：test-results/l1-baseline.json（记得随证据一起提交）"
 fi
+[ "$failed_gates" = "1" ] && failed=1
 if [ $failed -eq 0 ]; then
-  echo "✅ 全部通过。五份证据出自同一次运行。"
+  echo "✅ 全部通过。七份证据出自同一次运行。"
   echo "   注：'证据是否晚于源码改动'**不在本脚本内判定**——本脚本自己会刷新证据，故在运行内判定恒为真"
   echo "   （第十二轮受控实验实测：写进去的空门从不触发）。该检查在 bash dsh-adapter/review-declare.sh（声明前自检）里。"
   exit 0

@@ -7,7 +7,8 @@
 
 | 用例 | 期望 | 实际 | 依据 | 结果 |
 |---|---|---|---|---|
-| --force-review 识别 | true | true | 裁决2 | ✅ |
+| --force-review 识别（行首独立指令） | true | true | 裁决2/S0-fix | ✅ |
+| --force-review 行内引述不识别（判别夹具） | false | false | S0-fix | ✅ |
 | review: force 识别 | true | true | 裁决2 | ✅ |
 | quiet 字面量不误判为 force | false | false | 裁决2 | ✅ |
 | 普通讨论文本不触发 | false | false | 裁决2 | ✅ |
@@ -41,4 +42,4 @@
 | 复用记录：结论标注复用来源 | true | true | 裁决2 | ✅ |
 | 复用记录：报告路径指向上轮 | true | true | 裁决2 | ✅ |
 
-**25/25 通过, 0 失败**
+**46/46 通过, 0 失败**

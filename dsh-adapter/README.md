@@ -23,7 +23,7 @@
 ## 运行测试 / 刷新 L1 基线（**唯一推荐入口**）
 
 ```bash
-bash dsh-adapter/run-tests.sh                      # 跑全部四套，证据写入 test-results/
+bash dsh-adapter/run-tests.sh                      # 跑全部六项检查，证据写入 test-results/
 bash dsh-adapter/run-tests.sh --update-l1-baseline # L1 内容有变时刷新基线
 bash dsh-adapter/run-tests.sh --dsh <checkout>     # 指定 dsh checkout（默认自动探测）
 ```
@@ -35,10 +35,11 @@ bash dsh-adapter/run-tests.sh --dsh <checkout>     # 指定 dsh checkout（默�
 | 套件 | 断言数 | 关注点 |
 |---|---|---|
 | `l1-seat` | 70 | 座位机制（会话作用域 section）+ 字符门 + 门触发与告警可见性 + 静态回归守卫 |
-| `l1-invariants` | 126 | L1 义务不变量（关键词 + 定义级 + 依赖闭包）+ **第 H 组证据新鲜度门** |
-| `reviewer-deliverable` | 123 | 触发判据/声明解析/组包/指纹/漂移/复用等纯逻辑 |
-| `reviewer-decision-gates` | 25 | 四项裁决（漂移即失效 / 同目标复用 / auto 间隔 / 全文落盘） |
+| `l1-invariants` | 149 | L1 义务不变量（关键词 + 定义级 + 依赖闭包）+ **第 H 组证据新鲜度门** |
+| `reviewer-deliverable` | 125 | 触发判据/声明解析/组包/指纹/漂移/复用等纯逻辑 |
+| `reviewer-decision-gates` | 46 | 四项裁决（漂移即失效 / 同目标复用 / auto 间隔 / 全文落盘） |
 | `review-declare.sh` | 12 | 声明生成器自验证（基线取 INDEX 且按 UTC 解释 / 分类白名单 / 降级告警与退出码 / 证据产物排除） |
+| `tools/negative-control.sh` | — | **负控门**（判据可响性）：注册表 `negative-controls.txt` 中每个判据脚本须"原样成功 ∧ **施加破坏式后失败**"；三个探针已验证它会响：假变异 → "未命中"、恒真判据 → "不会响" |
 
 **何时必须跑**（内核维护要求，见 `docs/08 §7`）：**L1 注入面 = ① `METHODOLOGY.md §0–§1` + ② `knowledge/review-lessons.md` 的 `## 基层` 段 + ③ `univedge-l1-inject.ts` 内的确认纪律块（`CONFIRM_DISCIPLINE`，随 §0–§1 一起拼入 L1）**——三者任一改动后必须重跑；
 **L1 内容确有变化时**用 `--update-l1-baseline` 刷新 `test-results/l1-baseline.json`（该文件须随证据一起提交）。

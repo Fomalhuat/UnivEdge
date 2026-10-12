@@ -1,0 +1,6 @@
+# 负控注册表：name | target（相对仓库根） | 破坏式（sed 表达式，须真正命中目标）
+# 依据：VERIFICATION §3.4.1 #6 + 用户 2026-10-12 批准（判据可响性升级为门）
+# 每项含义：目标脚本原样运行须成功；**施加破坏式后必须失败**——否则该判据不会响。
+Wittek2024-式(40)判据 | ?run/lit-wittek2024-eq40/repro/verify_eq40.py | s/dPsi\[1\] + xd\[0\]\*dPsi\[0\]/dPsi[1] - xd[0]*dPsi[0]/
+# 待办（R7 S1-4/S1-8）：为审查插件各门（P0-B 去重 / 复用判定 / 漂移 / quiet-force）各登记一条**版本库内**目标。
+Wittek2024-字形映射 | ?run/lit-wittek2024-eq40/repro/check_glyph_mapping.py | s/if not m.group(1).isalpha():/if m.group(1).isalpha():/

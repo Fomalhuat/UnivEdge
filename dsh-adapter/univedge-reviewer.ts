@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync, sta
 import { isAbsolute, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 import { join, dirname } from 'node:path'
-import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport, pickReportFromParent, extractTaskName, extractConclusion, appendReviewIndex, REVIEW_DIR, hasQuietDirective, hasForceDirective, allArtifactsUnchanged, shouldCooldown, contentHash, scanTurnDeclarations, transcriptOf, selectArtifacts, ARTIFACT_CAP, isUserAuthored } from './reviewer-shared.ts'
+import { toolCallArgs, ARTIFACT_EXT_SRC, autoTriggerPath, isTaskOutput, isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport, pickReportFromParent, extractTaskName, extractConclusion, appendReviewIndex, REVIEW_DIR, hasQuietDirective, hasForceDirective, allArtifactsUnchanged, shouldCooldown, contentHash, scanTurnDeclarations, transcriptOf, selectArtifacts, ARTIFACT_CAP, isUserAuthored } from './reviewer-shared.ts'
 
 /** 用户文本白名单（R7 第十一轮 S0-1）：实现见 `reviewer-shared.isUserAuthored`（**单一事实来源**）。
  *  本文件 re-export 以保持既有引用稳定；四个扫描面（任务描述 / quiet / force / 声明）共用同一判据。
@@ -285,7 +285,7 @@ export function extractReviewInput(session: any, startSeq = 0, endSeq = Number.M
  *   白名单不含 todo_write（只写计划文本，非交付——L1-3）；
  * - 信号 B：只匹配"完成态动词 + 文件名"（排除未来式规划句如"下一步将写入 x.md"——L1-2）。
  */
-function hasDeliverable(session: any, startSeq: number, endSeq: number): boolean {
+export function hasDeliverable(session: any, startSeq: number, endSeq: number): boolean {
   const evts = session?.events ?? []
   for (const ev of evts) {
     if (typeof ev.seq !== 'number' || ev.seq < startSeq || ev.seq > endSeq) continue
@@ -295,17 +295,17 @@ function hasDeliverable(session: any, startSeq: number, endSeq: number): boolean
       // 先反序列化取路径字段精确匹配；失败回退字符串匹配
       let hit = false
       try {
-        const parsed = typeof ev.data === 'object' ? ev.data : JSON.parse(String(ev.data ?? '{}'))
+        const parsed = toolCallArgs(ev)   // R7 第十八轮 S0-1：路径在 data.arguments 里，不在 data 层
         const candidates: string[] = [
           parsed?.file_path, parsed?.path, parsed?.file, parsed?.filePath, parsed?.new_path, parsed?.newPath,
           ...(Array.isArray(parsed?.items) ? parsed.items : []),
         ].filter((p): p is string => typeof p === 'string')
-        hit = candidates.some(isArtifactPath)
+        hit = candidates.some((p) => isArtifactPath(p) && autoTriggerPath(p))   // 自动通道只看任务产出
       } catch { /* fall through */ }
       if (!hit) {
         const s = JSON.stringify(ev.data ?? {})
-        const paths = s.match(/[^\s"']{1,200}\.(?:md|json|txt|log|csv|yaml|yml|dat)\b/gi) ?? []
-        hit = paths.some((p) => isArtifactPath(p.replace(/^"|"$/g, '')))
+        const paths = s.match(new RegExp(`[^\\s"']{1,200}\\.(?:${ARTIFACT_EXT_SRC})\\b`, 'gi')) ?? []
+        hit = paths.some((p) => { const c = p.replace(/^"|"$/g, ''); return isArtifactPath(c) && autoTriggerPath(c) })
       }
       if (hit) return true
     } else if (ev.type === 'assistant/message') {
@@ -320,13 +320,12 @@ function hasDeliverable(session: any, startSeq: number, endSeq: number): boolean
 }
 
 /** P1-A：本 turn 内 user/assistant 文本是否含 quiet 指令（--no-review / review:off）——跳过审查。 */
-function turnHasQuietDirective(session: any, startSeq: number, endSeq: number): boolean {
+export function turnHasQuietDirective(session: any, startSeq: number, endSeq: number): boolean {
   for (const ev of session?.events ?? []) {
     if (typeof ev.seq !== 'number' || ev.seq < startSeq || ev.seq > endSeq) continue
-    if (ev.type !== 'user/message' && ev.type !== 'assistant/message') continue
-    // R7 第五轮 S2-3：排除子代理回执来源——评估者报告逐字引述 quiet 字面量时不应对主会话生效
-    const kind = ev.data?.source?.kind
-    if (ev.type === 'user/message' && !isUserAuthored(ev)) continue
+    // R7 第十八轮：**只看用户消息**（assistant 无权静默关审——实测我的解释性文字两度把含声明的轮次否掉）
+    if (ev.type !== 'user/message') continue
+    if (!isUserAuthored(ev)) continue   // 子代理回执/注入文本不生效（第五轮 S2-3 的既有防线）
     const msg = ev.data?.message ?? ev.data
     const content = msg?.content ?? []
     const txt = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('')
@@ -335,14 +334,14 @@ function turnHasQuietDirective(session: any, startSeq: number, endSeq: number): 
   return false
 }
 
-/** 裁决 2（2026-10-10）：本 turn 是否含强制重审指令（--force-review / review:force）。
+/** 裁决 2（2026-10-10）：本 turn 是否含强制重审指令（--force-review / review:force）。R7 第十八轮：同 quiet，仅用户消息 + 行首独立指令。
  *  与 turnHasQuietDirective 同构（同样的子代理回执排除规则——评估者报告引述该字面量不应生效）。 */
-function turnHasForceDirective(session: any, startSeq: number, endSeq: number): boolean {
+export function turnHasForceDirective(session: any, startSeq: number, endSeq: number): boolean {
   for (const ev of session?.events ?? []) {
     if (typeof ev.seq !== 'number' || ev.seq < startSeq || ev.seq > endSeq) continue
-    if (ev.type !== 'user/message' && ev.type !== 'assistant/message') continue
-    const kind = ev.data?.source?.kind
-    if (ev.type === 'user/message' && !isUserAuthored(ev)) continue
+    // R7 第十八轮 S0-2：force 与 quiet 同构——**只看用户消息**（上轮注释声称已改但函数体零改动）
+    if (ev.type !== 'user/message') continue
+    if (!isUserAuthored(ev)) continue
     const msg = ev.data?.message ?? ev.data
     const content = msg?.content ?? []
     const txt = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('')
@@ -371,19 +370,18 @@ export function sameReviewTarget(
 
 /** P0-B/P2-A：本 turn 的产物路径（结构化提取 write/edit/str_replace_editor 的路径字段，与 hasDeliverable 信号 A 一致）。
  * 仅用于 hash 去重与触发可见性；提取不到则返回空数组（allArtifactsUnchanged 对空列表返回 false，不误拦）。 */
-function artifactPathsOfTurn(session: any, startSeq: number, endSeq: number): string[] {
+export function artifactPathsOfTurn(session: any, startSeq: number, endSeq: number): string[] {
   const paths = new Set<string>()
   for (const ev of session?.events ?? []) {
     if (typeof ev.seq !== 'number' || ev.seq < startSeq || ev.seq > endSeq) continue
     if (ev.type !== 'tool/call') continue
     const name = ev.data?.name ?? ev.data?.tool ?? ''
     if (!['write', 'edit', 'str_replace_editor'].includes(name)) continue
-    let parsed: any = ev.data
-    try { parsed = typeof ev.data === 'object' ? ev.data : JSON.parse(String(ev.data ?? '{}')) } catch { /* keep as-is */ }
+    const parsed: any = toolCallArgs(ev)   // R7 第十八轮 S0-1：同 hasDeliverable（真实形状的路径在 arguments 里）
     const candidates: string[] = [
       parsed?.file_path, parsed?.path, parsed?.file, parsed?.filePath, parsed?.new_path, parsed?.newPath,
       ...(Array.isArray(parsed?.items) ? parsed.items : []),
-    ].filter((p): p is string => typeof p === 'string').filter(isArtifactPath)
+    ].filter((p): p is string => typeof p === 'string').filter(isArtifactPath).filter(autoTriggerPath)
     for (const c of candidates) paths.add(c)
   }
   return [...paths]
@@ -504,6 +502,7 @@ export function apply(ctx: Context): void {
     // 触发判据接线点（R7 第七轮 S0-2）：scanTurnDeclarations → extractReviewDeclarations（行内/行首 + 引述中和）。
     // 判据 = "存在 @review 且其后至少一个可解析路径"，引述式内联代码跨度不计入。
     const declared = scanTurnDeclarations(session?.events ?? [], startSeq, endSeq)
+    if (declared.length) diag('declared receipt:', declared.length, 'path(s) declared this turn')
     if (declared.length > 0) {
       // 裁决 2（2026-10-10）：**同清单 + 同指纹 → 复用上轮结论**（写显式记录，非静默跳过）。
       // 依据：账本 §2.1 显示 6 轮中多轮在审"同一快照"；`--force-review` / `review:force` 保留强制重审出口。
@@ -580,8 +579,10 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
   }
   diag('parent found:', parent.id)
 
-  // 5 分钟超时保护
-  const signal = AbortSignal.timeout(300_000)
+  // 评审超时（第十八轮：默认由 5 分钟放宽到 8 分钟——实测两轮都在 5 分钟处超时、全部走迟到回收；可用环境变量覆盖）
+  const _tmo = Number(process.env.UNIVEDGE_REVIEW_TIMEOUT_MS)
+  const REVIEW_TIMEOUT_MS = Number.isFinite(_tmo) && _tmo > 0 ? _tmo : 480_000   // NaN/非法值回落默认（R7 S2-5）
+  const signal = AbortSignal.timeout(REVIEW_TIMEOUT_MS)
   let childId: string | undefined
 
   try {
@@ -649,7 +650,9 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
   // 写审查报告（缺陷 3：按评估者会话分目录，杜绝后写覆盖先写）
   const task = extractTaskName(input.artifacts) // 从触发轮产物路径提取任务名（可空，仅进索引）
   // 裁决 4（2026-10-10）：评估者全文随报告一并归档（review.md 只是单条最长消息）
-  const transcript = transcriptOf(child?.session?.events ?? [])
+  // 第十八轮：transcript 亦取主会话全文（此前只含子会话摘要——与 report 同类缺陷的残留面）
+  const trChild = transcriptOf(child?.session?.events ?? [])
+  const transcript = fromParent.length > trChild.length ? fromParent : trChild
   persistReport(root, session, childId, report, task, turn, channel, input.fingerprints, transcript || undefined)
   recordSuccess(session.id) // 报告落盘 = 成功，复位失败计数 + 记录成功时间（P0-A 冷却期用）
   // 裁决 2（2026-10-10）：记录本轮审查目标（声明清单 + 各产物指纹），供下次 declared 判定
@@ -753,7 +756,9 @@ async function collectLateReport(ctx: Context, root: string, session: any, child
   // 裁决 4（2026-10-10）：迟到路径同样归档评估者全文（与主路径一致，避免"只有主路径有全文"）
   const lateTranscript = (): string | undefined => {
     const tr = transcriptOf((ctx.agents.get(childId as any) as any)?.session?.events ?? [])
-    return tr || undefined
+    const pr = pickReportFromParent(session?.events ?? [], childId as string)
+    const best = pr.length > tr.length ? pr : tr
+    return best || undefined
   }
   // 1) 竞态窗口：wait failed 瞬间可能已产出（如 turn/end 刚完成但事件未及时送达）
   const immediate = tryPick()
@@ -765,7 +770,7 @@ async function collectLateReport(ctx: Context, root: string, session: any, child
   // 2) 挂迟到监听（限时 5 分钟）：子代理稍后完成 turn/end 则回收
   try {
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => { off(); reject(new Error('late report timeout')) }, 300_000)
+      const timer = setTimeout(() => { off(); reject(new Error('late report timeout')) }, REVIEW_TIMEOUT_MS)
       const off = ctx.on('session/event', (s: any, ev: any) => {
         if (s?.id === childId && ev?.type === 'turn/end') {
           clearTimeout(timer)
