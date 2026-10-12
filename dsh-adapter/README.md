@@ -37,7 +37,7 @@ bash dsh-adapter/run-tests.sh --dsh <checkout>     # 指定 dsh checkout（默�
 | `l1-seat` | 70 | 座位机制（会话作用域 section）+ 字符门 + 门触发与告警可见性 + 静态回归守卫 |
 | `l1-invariants` | 149 | L1 义务不变量（关键词 + 定义级 + 依赖闭包）+ **第 H 组证据新鲜度门** |
 | `reviewer-deliverable` | 125 | 触发判据/声明解析/组包/指纹/漂移/复用等纯逻辑 |
-| `reviewer-decision-gates` | 46 | 四项裁决（漂移即失效 / 同目标复用 / auto 间隔 / 全文落盘） |
+| `reviewer-decision-gates` | 51 | 四项裁决（漂移即失效 / 同目标复用 / auto 间隔 / 全文落盘） |
 | `review-declare.sh` | 12 | 声明生成器自验证（基线取 INDEX 且按 UTC 解释 / 分类白名单 / 降级告警与退出码 / 证据产物排除） |
 | `tools/negative-control.sh` | — | **负控门**（判据可响性）：注册表 `negative-controls.txt` 中每个判据脚本须"原样成功 ∧ **施加破坏式后失败**"；三个探针已验证它会响：假变异 → "未命中"、恒真判据 → "不会响" |
 

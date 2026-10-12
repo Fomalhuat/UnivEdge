@@ -122,7 +122,7 @@ S0 问题清单……
 | 声明解析：讨论里引述真实路径但无 @review → 不构成声明 | 0 | 0 | S0-1 | ✅ |
 | 声明解析：通配符不是路径 | 0 | 0 | S0-1 | ✅ |
 | 声明解析：非 ASCII（中文）路径必须被解析 | 1 | 1 | S0-1 | ✅ |
-| 声明：相对路径按 session cwd 解析（不依赖 process.cwd） | /tmp/cwdrel-0nSvvY/dsh-adapter/x.ts | /tmp/cwdrel-0nSvvY/dsh-adapter/x.ts | S0-1 | ✅ |
+| 声明：相对路径按 session cwd 解析（不依赖 process.cwd） | /tmp/cwdrel-Xe4y2S/dsh-adapter/x.ts | /tmp/cwdrel-Xe4y2S/dsh-adapter/x.ts | S0-1 | ✅ |
 | 声明：解析成功后不再出现在 dropped | 0 | 0 | S0-1 | ✅ |
 | 声明：相对路径也被记录指纹 | string | string | S0-1 | ✅ |
 | 声明解析：含空格的中文路径不会被截断成子串 | false | false | S0-1 | ✅ |

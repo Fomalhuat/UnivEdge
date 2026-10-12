@@ -30,8 +30,13 @@ while [ $# -gt 0 ]; do
     -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) echo "未知参数：$1（-h 查看用法）" >&2; exit 2 ;;
   esac
+
   shift
 done
+
+# 门输出缓冲（R7 第十七轮 S1-6；必须在任何 GATES 使用之前初始化——曾因初始化滞后触发 set -u 报错）
+GATES=""
+failed_gates=0
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"     # dsh-adapter/
 ROOT="$(cd "$HERE/.." && pwd)"                            # UnivEdge 仓库根
@@ -102,9 +107,6 @@ if [ -n "$dirty" ]; then
     echo
   fi
 fi
-# ---- 门输出落盘（R7 第十七轮 S1-6）：两个门（契约提醒 / 计数一致性）不再只打印到 stdout ----
-GATES=""
-failed_gates=0
 # ---- 逐套跑，证据落盘 ----
 failed=0
 printf '%-28s %s\n' "测试套件" "结果"

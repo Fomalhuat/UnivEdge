@@ -41,5 +41,30 @@
 | 复用记录：通道列标 declared-reuse | true | true | 裁决2 | ✅ |
 | 复用记录：结论标注复用来源 | true | true | 裁决2 | ✅ |
 | 复用记录：报告路径指向上轮 | true | true | 裁决2 | ✅ |
+| quiet：行首独立指令（用户消息）命中 | true | true | S0-fix | ✅ |
+| quiet：行内引述不命中（旧实现会误命中 → 会响） | false | false | S0-fix | ✅ |
+| quiet：行内代码块中的字面量不命中 | false | false | S0-fix | ✅ |
+| quiet：列表项形式的行首指令命中 | true | true | S0-fix | ✅ |
+| quiet：引用符后的行首指令命中 | true | true | S0-fix | ✅ |
+| quiet 判定：assistant 文本即使行首出现指令也**不生效**（仅用户消息可静默） | false | false | S0-fix | ✅ |
+| quiet 判定：用户消息行首指令生效 | true | true | S0-fix | ✅ |
+| quiet 判定：子代理回执（注入/报告）不生效 | false | false | S0-fix | ✅ |
+| force：同上，assistant 的行首指令不生效 | false | false | S0-fix | ✅ |
+| force：用户消息行首指令生效 | true | true | S0-fix | ✅ |
+| 生产形状：hasDeliverable 认得 arguments 里的产物路径（旧实现为 false） | true | true | S0-1 | ✅ |
+| 生产形状：artifactPathsOfTurn 取出该路径（旧实现为 []） | /tmp/tc-beoOKA/run/task-a/artifact.md | /tmp/tc-beoOKA/run/task-a/artifact.md | S0-1 | ✅ |
+| 向后兼容：旧夹具形状（参数摊在 data 上）仍可解析 | /tmp/tc-beoOKA/run/task-a/artifact.md | /tmp/tc-beoOKA/run/task-a/artifact.md | S0-1 | ✅ |
+| 生产形状：去重门的前置（路径集合）不再为空 | true | true | S0-1 | ✅ |
+| 收窄：写内核文档 docs/*.md → **不**触发（判别夹具） | false | false | narrow | ✅ |
+| 收窄：写任务产出 run/<任务>/*.md → 触发 | true | true | narrow | ✅ |
+| 收窄：写基础设施 run/kernel-amendment/*.md → 不触发 | false | false | narrow | ✅ |
+| 收窄：审查自输出 run/review/*.md → 不触发 | false | false | narrow | ✅ |
+| 收窄：isTaskOutput 判定与豁免清单一致 | true,false,false,true | true,false,false,true | narrow | ✅ |
+| 收窄：总开关打开后，装置改动恢复自动触发（逃生门） | true | true | narrow | ✅ |
+| 生产回放：夹具覆盖全部四类路径 | true | true | S0-5 | ✅ |
+| 生产回放：apparatus（应不触发） | false | false | S0-5 | ✅ |
+| 生产回放：self-output（应不触发） | false | false | S0-5 | ✅ |
+| 生产回放：task-output（应触发） | true | true | S0-5 | ✅ |
+| 生产回放：infra（应不触发） | false | false | S0-5 | ✅ |
 
-**46/46 通过, 0 失败**
+**51/51 通过, 0 失败**

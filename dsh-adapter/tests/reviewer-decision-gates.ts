@@ -102,17 +102,7 @@ rmSync(dir, { recursive: true, force: true })
 rmSync(rootA, { recursive: true, force: true })
 rmSync(rootB, { recursive: true, force: true })
 
-// 落盘头部由**测试自己产出**（此前提交版是人工添加的 6 行头部，测试不产出 → 永远无法复现；
-// 修法：把头部移进测试，随代码一起演进。见 run/review/handoff-reviewer-overreview.md §六）
-console.log('# 测试落盘：reviewer-decision-gates\n')
-console.log(`- 日期：${new Date().toISOString().slice(0, 10)}`)
-console.log('- 命令：`tsx --tsconfig <dsh>/tsconfig.json tests/reviewer-decision-gates.ts`')
-console.log('- 场景：审查四项裁决实现（漂移即失效 / 同目标复用 + --force-review / auto 最小间隔常量 / 报告全文落盘）')
-console.log('- 依据：`run/review/handoff-reviewer-overreview.md` §六 待裁决 1/2/4（裁决 3 为触发路径参数，见源码 `AUTO_MIN_GAP_MIN` 注释）')
-console.log('')
-console.log('| 用例 | 期望 | 实际 | 依据 | 结果 |')
-console.log('|---|---|---|---|---|')
-for (const r of results) console.log(r)
+
 // ---------- quiet / force 判据的可响性（R7 第十八轮）：行首独立指令 + 仅用户消息 ----------
 // 判别夹具：以下 4 条在**旧实现**（裸子串匹配 + assistant 不过滤）下会得出相反结论——
 // 正因如此它们"会响"：修复前会失败、修复后通过。
@@ -183,6 +173,42 @@ for (const r of results) console.log(r)
   check('收窄：总开关打开后，装置改动恢复自动触发（逃生门）', hasDeliverable(mkWrite(docMd), 0, 9), true, 'narrow')
   delete process.env.UNIVEDGE_REVIEW_APPARATUS_AUTO
   rmSync(fx, { recursive: true, force: true })
+}
+
+
+
+
+// ---------- 生产路径回放（R7 第十八轮 S0-5）：判据取自**真实会话日志**的 tool/call 事件 ----------
+// 夹具 dsh-adapter/tests/fixtures/toolcall-real-shape.jsonl 由会话日志逐字抽取（含 origin_file_path 溯源），
+// 覆盖四类路径：task-output（应触发）/ apparatus（应不触发）/ infra（应不触发）/ self-output（应不触发）。
+{
+  const fxPath = new URL('./fixtures/toolcall-real-shape.jsonl', import.meta.url).pathname
+  const cases = readFileSync(fxPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+  check('生产回放：夹具覆盖全部四类路径', cases.length >= 4, true, 'S0-5')
+  for (const c of cases) {
+    const evs = [{ seq: 1, type: 'tool/call', data: c.data }]
+    check(`生产回放：${c.note}`, hasDeliverable({ events: evs }, 0, 9), c.expect_trigger === true, 'S0-5')
+  }
+}
+
+// 序列化放在**全部 check() 之后**（R7 第十八轮 S0-1：原实现把表格打印放在文件中部，
+// 其后追加的 20 条探针只计入计数、不进表格 → 留档证据与自述不符）
+// 落盘头部由**测试自己产出**（此前提交版是人工添加的 6 行头部，测试不产出 → 永远无法复现；
+// 修法：把头部移进测试，随代码一起演进。见 run/review/handoff-reviewer-overreview.md §六）
+console.log('# 测试落盘：reviewer-decision-gates\n')
+console.log(`- 日期：${new Date().toISOString().slice(0, 10)}`)
+console.log('- 命令：`tsx --tsconfig <dsh>/tsconfig.json tests/reviewer-decision-gates.ts`')
+console.log('- 场景：审查四项裁决实现（漂移即失效 / 同目标复用 + --force-review / auto 最小间隔常量 / 报告全文落盘）')
+console.log('- 依据：`run/review/handoff-reviewer-overreview.md` §六 待裁决 1/2/4（裁决 3 为触发路径参数，见源码 `AUTO_MIN_GAP_MIN` 注释）')
+console.log('')
+console.log('| 用例 | 期望 | 实际 | 依据 | 结果 |')
+console.log('|---|---|---|---|---|')
+for (const r of results) console.log(r)
+// 自检（R7 第十八轮 S0-1 机械化）：序列化前断言记录数必须等于计数——若有人在序列化之后插入 check()，
+// 表格会悄悄少行而末行计数照旧（本轮已两次踩到），故在此显式失败。
+if (results.length !== pass + fail) {
+  console.error(`✖ 断言记录不完整：results=${results.length}，pass+fail=${pass + fail}（有 check() 在序列化之后执行）`)
+  process.exit(1)
 }
 
 console.log(`\n**${pass}/${pass + fail} 通过, ${fail} 失败**`)
