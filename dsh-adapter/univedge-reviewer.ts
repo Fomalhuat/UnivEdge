@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync, sta
 import { isAbsolute, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 import { join, dirname } from 'node:path'
-import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport, extractTaskName, extractConclusion, appendReviewIndex, REVIEW_DIR, hasQuietDirective, hasForceDirective, allArtifactsUnchanged, shouldCooldown, contentHash, scanTurnDeclarations, transcriptOf, selectArtifacts, ARTIFACT_CAP, isUserAuthored } from './reviewer-shared.ts'
+import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport, pickReportFromParent, extractTaskName, extractConclusion, appendReviewIndex, REVIEW_DIR, hasQuietDirective, hasForceDirective, allArtifactsUnchanged, shouldCooldown, contentHash, scanTurnDeclarations, transcriptOf, selectArtifacts, ARTIFACT_CAP, isUserAuthored } from './reviewer-shared.ts'
 
 /** 用户文本白名单（R7 第十一轮 S0-1）：实现见 `reviewer-shared.isUserAuthored`（**单一事实来源**）。
  *  本文件 re-export 以保持既有引用稳定；四个扫描面（任务描述 / quiet / force / 声明）共用同一判据。
@@ -630,8 +630,13 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
 
   // 读评估者回复（缺陷 4 + S2-2：pickReport 取"含报告标志的实质消息中最长"，防摘要桩也防长分析顶掉）
   const child = ctx.agents.get(childId as any) as any
-  const report = pickReport(child?.session?.events ?? [])
-  diag('report length:', report.length)
+  // R7 第十四轮 S1-9：**先查主会话的 subagent-report 事件**（评估者真正交付的报告正文），
+  // 再退回子会话 assistant 消息（可能只是收尾摘要——实测 1135 字符 vs 完整报告约 1.3 万字符）。
+  const fromParent = pickReportFromParent(session?.events ?? [], childId as string)
+  const fromChild = pickReport(child?.session?.events ?? [])
+  const report = fromParent.length >= fromChild.length ? fromParent : fromChild
+  diag('report source:', fromParent.length >= fromChild.length ? 'parent/subagent-report' : 'child/assistant-message',
+       '| parent len', fromParent.length, '| child len', fromChild.length)
 
   if (!report) {
     // 缺陷 2：空报告显式落盘（含 childId/时间/turn 窗口），而非静默 return——供诊断 token/速率限制
@@ -741,7 +746,9 @@ async function collectLateReport(ctx: Context, root: string, session: any, child
   diag('collectLateReport start, child:', childId)
   const tryPick = (): string => {
     const child = ctx.agents.get(childId as any) as any
-    return pickReport(child?.session?.events ?? [])
+    const a = pickReportFromParent(session?.events ?? [], childId as string)
+    const b = pickReport(child?.session?.events ?? [])
+    return a.length >= b.length ? a : b
   }
   // 裁决 4（2026-10-10）：迟到路径同样归档评估者全文（与主路径一致，避免"只有主路径有全文"）
   const lateTranscript = (): string | undefined => {

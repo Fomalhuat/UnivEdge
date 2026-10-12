@@ -14,7 +14,7 @@
  *  - 显式审查点（2026-08-31 framework-redesign 方向 1）：@review 声明提取（文本级）+ 事件级扫描
  */
 import { extractReviewInput, fingerprint, persistReport } from '../univedge-reviewer'
-import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport, isReviewSelfOutput, extractTaskName, extractConclusion, reviewIndexPath, extractReviewDeclarations, selectArtifacts, isLowPriorityArtifact } from '../reviewer-shared'
+import { isArtifactPath, textHasDeliverable, reviewOutDir, emptyOutDir, pickReport, pickReportFromParent, isReviewSelfOutput, extractTaskName, extractConclusion, reviewIndexPath, extractReviewDeclarations, selectArtifacts, isLowPriorityArtifact } from '../reviewer-shared'
 
 let pass = 0
 let fail = 0
@@ -248,12 +248,16 @@ import { extractReviewDeclarations, scanTurnDeclarations } from '../reviewer-sha
   const sess = { header: { cwd: fx }, events: evs }
   const r = extractReviewInput(sess, 10, seq, [])
   check('上限：24 项候选按上限封顶（原 12 → 实测丢弃 18 项）', r.artifacts.length, 20, 'S2')
-  check('上限：低优先级（证据/文档/README）全部让位', lows.every((p) => !r.artifacts.includes(p)), true, 'S2')
+  // R7 第十四轮 S1-8：`docs/` 不再算低优先级（文档任务的主交付物就是 docs/*.md）——
+  // 实测 docx/10 曾被挤出指纹集，导致主交付物无法声明"窗口内无改写"。
+  check('上限：文档（docs/）属正常优先级，不被降级挤出', r.artifacts.includes(`${fx}/docs/low-doc.md`), true, 'S1-8')
+  check('上限：低优先级仅限可再生产物（证据/归档/README）', [lows[1], lows[2], lows[3]].every((p) => !r.artifacts.includes(p)), true, 'S1-8')
   check('上限：落选者显式回报（不再静默丢弃）', r.dropped.filter((d) => d.includes('未入列')).length, 4, 'S2')
-  check('上限：行为定义源全数入列', subs.every((p) => r.artifacts.includes(p)), true, 'S2')
+  // 名额 20：docs/low-doc.md（最新）占 1 → 余 19 给行为定义源，按最近写入取 subs[1..19]，最旧的 subs[0] 落选
+  check('上限：落选的是最旧的行为定义源（最近写入优先）', [subs.slice(1).every((p) => r.artifacts.includes(p)), r.artifacts.includes(subs[0])], [true, false], 'S2')
   // 声明项**必然**入列（即便属低优先级）：声明是生成者的显式裁决，优先级不得覆盖它
-  const r2 = extractReviewInput(sess, 10, seq, [`${fx}/docs/low-doc.md`])
-  check('上限：被声明的低优先级文件不被上限挤掉', r2.artifacts.includes(`${fx}/docs/low-doc.md`), true, 'S2')
+  const r2 = extractReviewInput(sess, 10, seq, [`${fx}/README.md`])
+  check('上限：被声明的低优先级文件不被上限挤掉', r2.artifacts.includes(`${fx}/README.md`), true, 'S2')
   rmSync(fx, { recursive: true, force: true })
 }
 
@@ -261,14 +265,16 @@ import { extractReviewDeclarations, scanTurnDeclarations } from '../reviewer-sha
 {
   const at = (m: Map<string, number>) => (p: string) => m.get(p) ?? -1
   const m1 = new Map([['/a/sub-new.ts', 9], ['/a/sub-old.ts', 1], ['/a/docs/d.md', 99]])
-  check('选择器：低优先级即便更新也让位于行为定义源',
-    selectArtifacts([], ['/a/sub-old.ts', '/a/docs/d.md'], at(m1), 1).picked, ['/a/sub-old.ts'], 'S2')
+  check('选择器：低优先级（证据/README）即便更新也让位于行为定义源',
+    selectArtifacts([], ['/a/sub-old.ts', '/a/test-results/d.md'], at(m1), 1).picked, ['/a/sub-old.ts'], 'S2')
+  check('选择器：docs 不属低优先级，按最近写入取胜（S1-8）',
+    selectArtifacts([], ['/a/sub-old.ts', '/a/docs/d.md'], at(m1), 1).picked, ['/a/docs/d.md'], 'S1-8')
   const two = selectArtifacts([], ['/a/sub-old.ts', '/a/sub-new.ts'], at(m1), 1)
   check('选择器：同优先级内按最近写入取', two.picked, ['/a/sub-new.ts'], 'S2')
   check('选择器：落选者进 notPicked（供显式回报）', two.notPicked, ['/a/sub-old.ts'], 'S2')
-  check('低优先级判定：证据/文档/README 命中，源码与知识库不命中',
+  check('低优先级判定：仅可再生产物命中（证据/归档/README）；docs 与源码、知识库均不命中',
     ['/a/docs/x.md', '/a/README.md', '/a/test-results/x.md', '/a/archive/x.md', '/a/dsh-adapter/univedge-reviewer.ts', '/a/knowledge/review-lessons.md'].map(isLowPriorityArtifact),
-    [true, true, true, true, false, false], 'S2')
+    [false, true, true, true, false, false], 'S1-8')
 }
 
 // ---------- 输入包：结构化参数提取的正向断言（R7 第四轮 S1-9） ----------
@@ -289,6 +295,30 @@ import { extractReviewDeclarations, scanTurnDeclarations } from '../reviewer-sha
   check('输入包：窗口内未声明、仅经 file_path 给出的 .md 必须入列（锁结构化提取）', r.artifacts.includes(target), true, 'S1-9')
   check('输入包：为该产物记录指纹（size/mtime/sha256）', typeof r.fingerprints[target], 'string', 'S0-1')
   rmSync(fixtureRoot2, { recursive: true, force: true })
+}
+
+// ---------- 报告取值：主会话 subagent-report 优先（R7 第十四轮 S1-9） ----------
+// 实测：两轮完整报告以 `user/message` + source.kind='subagent-report' + senderSessionId 落在**主会话**，
+// 而子会话 assistant 消息只有收尾摘要（1135 字符 vs 约 1.3 万字符）→ 原实现只读子会话，审计留痕丢失发现内容。
+{
+  const full = '# 审查报告\n\n## 1. 结论：**需修订**（S0 = 2）\n' + 'A'.repeat(400) + '\n## 4. S2 建议项（6 条）\n- x'
+  const mkMsg = (kind: string | undefined, sender: string | undefined, text: string) => ({
+    type: 'user/message',
+    data: { source: kind ? { kind, senderSessionId: sender } : undefined, content: [{ type: 'text', text }] },
+  })
+  const parent = [
+    mkMsg('subagent-report', 'session-child-1', full),
+    mkMsg('subagent-report', 'session-child-2', '# 审查报告\n\n## 结论：需修订\n' + 'B'.repeat(50)),
+    mkMsg('user', undefined, full),                                  // 人发的长文本不得被当报告
+    mkMsg('subagent-report', 'session-child-1', '审查完成，报告已交付。\n\n## 结论：需修订'),
+  ]
+  check('报告取值：取主会话中该子会话的最长报告（不是收尾摘要）',
+    pickReportFromParent(parent, 'child-1').includes('S2 建议项'), true, 'S1-9')
+  check('报告取值：隔离其他子会话的报告', pickReportFromParent(parent, 'child-2').includes('S2 建议项'), false, 'S1-9')
+  check('报告取值：无匹配子会话时返回空（交给子会话回落）', pickReportFromParent(parent, 'child-9'), '', 'S1-9')
+  check('报告取值：不把用户消息当报告', pickReportFromParent([mkMsg('user', undefined, full)], 'child-1'), '', 'S1-9')
+  // 报告标志须认得 "## 1. 结论"（带序号）——完整报告正是这种标题，早先的 /##\s*结论/ 会漏
+  check('报告标志：认得带序号的结论标题（## 1. 结论）', pickReport([{ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: full }] } } }]).includes('S2 建议项'), true, 'S1-9')
 }
 
 // ---------- 产物指纹与漂移检出（R7 第四轮 S0-1） ----------

@@ -1,6 +1,6 @@
 # L1 义务不变量测试结果（"强制力不降"的可判定判据）
 
-- 日期：2026-10-11
+- 日期：2026-10-12
 - 命令：`tsx --tsconfig <dsh>/tsconfig.json tests/l1-invariants.ts`
 - 计数规则：**一条断言 = 一个义务**（括号子项逐条列出，不合并）——N 是确定的
 - 判据层次：关键词存在性 + **定义级**（信号名与其判据文字同时在场）+ **依赖闭包**（保留文本依赖的术语其定义亦须在场）
@@ -9,7 +9,7 @@
 - **基线 = L1 内容指纹**（`test-results/l1-baseline.json`；L1 变化后运行 `bash dsh-adapter/run-tests.sh --update-l1-baseline` 刷新）
 - 以下为**输入整文件**指纹（仅供参考，**不**作为判据——切片外改动不应触发过期）：
   - `METHODOLOGY.md` → 37062B/2026-10-11T05:43:59.480Z/b0eaf216144f
-  - `knowledge/review-lessons.md` → 16906B/2026-10-11T07:04:16.177Z/bc1b8fff7991
+  - `knowledge/review-lessons.md` → 18204B/2026-10-11T07:48:15.636Z/6e274aa82fef
 
 | 组 | 义务 | 断言文本 | 结果 |
 |---|---|---|---|

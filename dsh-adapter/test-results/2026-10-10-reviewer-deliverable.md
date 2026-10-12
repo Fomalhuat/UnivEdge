@@ -1,6 +1,6 @@
 # reviewer 逻辑单元测试结果（shared 模块）
 
-- 日期：2026-10-11
+- 日期：2026-10-12
 - 命令：`tsx --tsconfig <dsh>/tsconfig.json tests/reviewer-deliverable.ts`
 - 覆盖：触发判据（A/B 层）+ 缺陷 2/3/4 + S1-1/S1-4/S1-5 + S2-2 + INDEX 创建/追加/并发 + 共享模块单一事实来源（S1-2）+ 风暴抑制（quiet/冷却/hash/r7-）+ @review 声明通道
 
@@ -92,16 +92,23 @@ S0 问题清单……
 | 输入包：不再塞入早前轮的审查风暴文件 | false | false | S1-5 | ✅ |
 | 输入包：无声明路径时保留兜底（含早前轮文件，不把输入包清空） | true | true | S1-5 | ✅ |
 | 上限：24 项候选按上限封顶（原 12 → 实测丢弃 18 项） | 20 | 20 | S2 | ✅ |
-| 上限：低优先级（证据/文档/README）全部让位 | true | true | S2 | ✅ |
+| 上限：文档（docs/）属正常优先级，不被降级挤出 | true | true | S1-8 | ✅ |
+| 上限：低优先级仅限可再生产物（证据/归档/README） | true | true | S1-8 | ✅ |
 | 上限：落选者显式回报（不再静默丢弃） | 4 | 4 | S2 | ✅ |
-| 上限：行为定义源全数入列 | true | true | S2 | ✅ |
+| 上限：落选的是最旧的行为定义源（最近写入优先） | true,false | true,false | S2 | ✅ |
 | 上限：被声明的低优先级文件不被上限挤掉 | true | true | S2 | ✅ |
-| 选择器：低优先级即便更新也让位于行为定义源 | /a/sub-old.ts | /a/sub-old.ts | S2 | ✅ |
+| 选择器：低优先级（证据/README）即便更新也让位于行为定义源 | /a/sub-old.ts | /a/sub-old.ts | S2 | ✅ |
+| 选择器：docs 不属低优先级，按最近写入取胜（S1-8） | /a/docs/d.md | /a/docs/d.md | S1-8 | ✅ |
 | 选择器：同优先级内按最近写入取 | /a/sub-new.ts | /a/sub-new.ts | S2 | ✅ |
 | 选择器：落选者进 notPicked（供显式回报） | /a/sub-old.ts | /a/sub-old.ts | S2 | ✅ |
-| 低优先级判定：证据/文档/README 命中，源码与知识库不命中 | true,true,true,true,false,false | true,true,true,true,false,false | S2 | ✅ |
+| 低优先级判定：仅可再生产物命中（证据/归档/README）；docs 与源码、知识库均不命中 | false,true,true,true,false,false | false,true,true,true,false,false | S1-8 | ✅ |
 | 输入包：窗口内未声明、仅经 file_path 给出的 .md 必须入列（锁结构化提取） | true | true | S1-9 | ✅ |
 | 输入包：为该产物记录指纹（size/mtime/sha256） | string | string | S0-1 | ✅ |
+| 报告取值：取主会话中该子会话的最长报告（不是收尾摘要） | true | true | S1-9 | ✅ |
+| 报告取值：隔离其他子会话的报告 | false | false | S1-9 | ✅ |
+| 报告取值：无匹配子会话时返回空（交给子会话回落） |  |  | S1-9 | ✅ |
+| 报告取值：不把用户消息当报告 |  |  | S1-9 | ✅ |
+| 报告标志：认得带序号的结论标题（## 1. 结论） | true | true | S1-9 | ✅ |
 | 指纹：文件内容变化即检出（组包后改写可被判为漂移） | true | true | S0-1 | ✅ |
 | 指纹：不存在文件返回 undefined（不抛错） | undefined | undefined | S0-1 | ✅ |
 | 声明解析：12 项散文清单（含 .ts/.py）全部解析 | 12 | 12 | S0-1 | ✅ |
@@ -113,7 +120,7 @@ S0 问题清单……
 | 声明解析：讨论里引述真实路径但无 @review → 不构成声明 | 0 | 0 | S0-1 | ✅ |
 | 声明解析：通配符不是路径 | 0 | 0 | S0-1 | ✅ |
 | 声明解析：非 ASCII（中文）路径必须被解析 | 1 | 1 | S0-1 | ✅ |
-| 声明：相对路径按 session cwd 解析（不依赖 process.cwd） | /tmp/cwdrel-IzMfUG/dsh-adapter/x.ts | /tmp/cwdrel-IzMfUG/dsh-adapter/x.ts | S0-1 | ✅ |
+| 声明：相对路径按 session cwd 解析（不依赖 process.cwd） | /tmp/cwdrel-btvonA/dsh-adapter/x.ts | /tmp/cwdrel-btvonA/dsh-adapter/x.ts | S0-1 | ✅ |
 | 声明：解析成功后不再出现在 dropped | 0 | 0 | S0-1 | ✅ |
 | 声明：相对路径也被记录指纹 | string | string | S0-1 | ✅ |
 | 声明解析：含空格的中文路径不会被截断成子串 | false | false | S0-1 | ✅ |
@@ -135,4 +142,4 @@ S0 问题清单……
 | 报告：组包后产物被改写 → 结论标失效（机制判定，2026-10-10 裁决 1 收紧） | true | true | S1-4b | ✅ |
 | 报告：状态行显式标注已失效 | true | true | S1-4b | ✅ |
 
-**116/116 通过, 0 失败**
+**123/123 通过, 0 失败**

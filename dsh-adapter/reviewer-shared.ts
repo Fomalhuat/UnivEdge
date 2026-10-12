@@ -48,14 +48,14 @@ export function isArtifactPath(p: string): boolean {
 export const ARTIFACT_CAP = 20
 
 /** 低优先级产物（**仅在超出上限时才让位**，绝不清空输入包）：
- *  证据产物（每次测试重写）、README（每次计数刷新）、docs/（描述"为什么这样设计"，
- *  行为定义源在代码与规范文档里）。R7 第十一轮 S2：原实现纯按"最近写入"排序，
- *  使同轮被重写的证据文件挤掉 `univedge-l1-inject.ts` / `reviewer-shared.ts` 这类真正要审的源文件。 */
+ *  证据产物（每次测试重写）与 README（每次计数刷新）。
+ *  ⚠️ R7 第十四轮 S1-8：早先把 `docs/` 也判为低优先级是**错的**——文档任务的主交付物就是 docs/*.md，
+ *  于是 `docs/10`（审查对象本体）被 20 项上限挤出指纹集，连"审查窗口内无改写"都无法声明。
+ *  判据修正为**只降级"可再生产物"**（证据/归档/README），文档与源码一律正常优先级。 */
 export function isLowPriorityArtifact(p: string): boolean {
   return (
     /(?:^|\/)(?:test-results|archive)\//.test(p) ||
-    /(?:^|\/)README\.md$/i.test(p) ||
-    /(?:^|\/)docs\//.test(p)
+    /(?:^|\/)README\.md$/i.test(p)
   )
 }
 
@@ -102,8 +102,30 @@ export function emptyOutDir(root: string, mainId: string): string {
 
 /** 报告提取：含报告专有锚的实质消息中取最长（完善项 3b：去高频词"通过/S0/S1/S2"——中间分析也常含，
  * 改用报告结构专有锚；防"长分析顶掉报告"）。 */
+export const REPORT_FLAG = /(##\s*\d*\.?\s*结论|#\s*独立审查报告|解耦声明|需修订|问题清单|实质问题清单|S0 实质|S1 有依据|S2 建议)/i
+
+/** 从**主会话**事件里取评估者交付的报告正文（R7 第十四轮 S1-9）。
+ *  动机（实测）：`f24a86b6`／`1bb78b07` 两轮，子会话的 assistant/message 只有**收尾摘要**（1135 字符），
+ *  完整报告（含 S0/S1/S2 与逐项判定）以 `user/message` + `source.kind='subagent-report'`
+ *  + `source.senderSessionId` 落在**主会话**——原实现只读子会话，导致审计留痕丢失发现内容
+ *  （与"裁决 4：完整报告全文落盘"冲突）。取"含报告标志的最长者"，防摘要桩。 */
+export function pickReportFromParent(events: any[], childSessionId: string): string {
+  let best = ''
+  const want = String(childSessionId ?? '')
+  for (const ev of events ?? []) {
+    if (ev?.type !== 'user/message') continue
+    const src = ev?.data?.source
+    if (!src || src.kind !== 'subagent-report') continue
+    if (want && src.senderSessionId && !String(src.senderSessionId).includes(want)) continue
+    const content = ev.data?.content ?? []
+    const txt = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('').trim()
+    if (!txt || !REPORT_FLAG.test(txt)) continue
+    if (txt.length > best.length) best = txt
+  }
+  return best
+}
+
 export function pickReport(events: any[]): string {
-  const REPORT_FLAG = /(##\s*结论|#\s*独立审查报告|解耦声明|需修订|问题清单|实质问题清单|S0 实质|S1 有依据|S2 建议)/i
   let best = ''
   for (const ev of events) {
     if (ev.type !== 'assistant/message') continue

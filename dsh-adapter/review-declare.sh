@@ -136,6 +136,15 @@ if [ "$MODE" = "selftest" ]; then
      "$(printf '%s' "$out3" | grep -cE 'docs/after\.md|dsh-adapter/until\.sh')" "2"
   ok "⑩ 证据产物（test-results/）不入候选（否则指纹必变 → reuse 永不命中）" \
      "$(printf '%s' "$out3" | grep -c 'test-results/evidence.md')" "0"
+  # ⑪⑫ 证据新鲜度（第十二轮）：本脚本判定；run-tests.sh 内部因自刷新证据而恒不触发（已实测）
+  printf '| 2020-01-01T00:00:00 | a | b | 通过 | declared | — | p |\n' > "$tmp/run/review/INDEX.md"
+  mkdir -p "$tmp/dsh-adapter/test-results"; : > "$tmp/dsh-adapter/test-results/2026-01-01-l1-seat.md"
+  sleep 1; touch "$tmp/dsh-adapter/univedge-reviewer.ts"          # 源码比证据新
+  out4="$(UNIVEDGE_DECLARE_ROOT="$tmp" bash "$HERE/review-declare.sh" 2>&1)"
+  ok "⑪ 改动晚于证据 → 告警（要求先重跑测试）" "$(printf '%s' "$out4" | grep -c '证据新鲜度')" "1"
+  touch "$tmp/dsh-adapter/test-results/2026-01-01-l1-seat.md"      # 证据刷新
+  out5="$(UNIVEDGE_DECLARE_ROOT="$tmp" bash "$HERE/review-declare.sh" 2>&1)"
+  ok "⑫ 证据晚于全部改动 → 静默（无假报）" "$(printf '%s' "$out5" | grep -c '证据新鲜度')" "0"
   rm -rf "$tmp" "$tmp2"
   printf '\n**%d/%d 通过, %d 失败**\n' "$pass" "$((pass+fail))" "$fail"
   exit $([ "$fail" -eq 0 ] && echo 0 || echo 1)
@@ -153,6 +162,22 @@ while IFS= read -r f; do
   [ -z "$f" ] && continue
   if is_hygiene "$f"; then hyg="$hyg$f"$'\n'; else subst="$subst$f"$'\n'; fi
 done <<< "$cand"
+# ── 证据新鲜度（第十二轮）：**只有本脚本能做这件事**——run-tests.sh 自己刷新证据，
+# 故"证据是否晚于源码改动"在它运行内恒为真（我写进去过一版，受控实验实测从不触发，已删）。
+# 判据：候选改动里若有文件比最新证据更晚 → 声明前必须先重跑测试（否则声明的证据不覆盖当前状态）。
+newest_ev=""
+for f in "$ROOT"/dsh-adapter/test-results/*.md; do
+  [ -f "$f" ] || continue
+  case "$f" in */archive/*) continue ;; esac
+  if [ -z "$newest_ev" ] || [ "$f" -nt "$newest_ev" ]; then newest_ev="$f"; fi
+done
+stale=""
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  [ -f "$ROOT/$f" ] || continue
+  if [ -z "$newest_ev" ] || [ "$ROOT/$f" -nt "$newest_ev" ]; then stale="$stale $f"; fi
+done <<< "$cand"
+
 n_subst="$(printf '%s' "$subst" | grep -c . || true)"
 n_hyg="$(printf '%s' "$hyg" | grep -c . || true)"
 
@@ -169,6 +194,12 @@ echo "  —— 卫生面：$n_hyg 项"
 print_list "$hyg"
 echo
 
+if [ -n "$stale" ]; then
+  echo "⚠ 证据新鲜度：以下改动**晚于最新证据**（$([ -n "$newest_ev" ] && echo "${newest_ev#"$ROOT"/}" || echo "无证据文件")）"
+  echo "   → 现有证据不覆盖当前状态，先重跑：bash dsh-adapter/run-tests.sh"
+  for f in $stale; do echo "     $f"; done
+  echo
+fi
 if [ -n "$deg" ]; then
   echo "⚠ 基线不可靠 → **不给出可直接粘贴的建议**。请先手工列全改动面（git status / git log）再决定。"
   exit 3
