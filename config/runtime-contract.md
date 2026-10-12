@@ -1,8 +1,9 @@
-# 运行时契约（Runtime Contract）· 草案 v0.1
+# 运行时契约（Runtime Contract）
 
+> 版本：v0.1（草案）｜ 日期：2026-08-12（头部体例于 2026-10-12 与内核其余文件对齐）
 > UnivEdge 对宿主环境的接口要求。宿主（WorkBuddy / 自建 CLI / 其他 agent 框架）应提供以下能力；
 > 缺失项由 UnivEdge 薄运行时补齐，或降级（在任务契约中声明降级）。
-> 状态：草案 —— 待 Step 4A vertical slice 验证后修订。
+> 状态：草案 —— 各 R 项的"实际达成情况"见下表；**该表须随宿主能力演进更新**（非一次性结论）。
 
 ## R1 执行环境
 - 多语言执行：Python / C++ / Fortran（至少 Python），返回 stdout/stderr/退出码；

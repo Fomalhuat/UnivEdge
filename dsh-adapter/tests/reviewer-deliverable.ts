@@ -89,9 +89,9 @@ check('新 selfcheck 路径：run/review/selfcheck/input.md 是自输出', isRev
 check('run/ 顶层任务目录（非 review 前缀）不是自输出', isArtifactPath('run/step4a/conclusion.md'), true, '结构')
 
 // ---------- 7. 任务名/结论提取 + 索引 ----------
-check('从产物路径提取任务名', extractTaskName(['/data/home/hanwu/UnivEdge/run/step4a/conclusion.md']), 'step4a', '索引')
-check('取最后匹配（当前活动任务）', extractTaskName(['/data/home/hanwu/UnivEdge/run/step4a/x.md', '/data/home/hanwu/UnivEdge/run/l4-task1/y.md']), 'l4-task1', '索引')
-check('review 前缀不算任务名', extractTaskName(['/data/home/hanwu/UnivEdge/run/review/9e496951/review.md']), undefined, '索引')
+check('从产物路径提取任务名', extractTaskName(['/repo/run/step4a/conclusion.md']), 'step4a', '索引')
+check('取最后匹配（当前活动任务）', extractTaskName(['/repo/run/step4a/x.md', '/repo/run/l4-task1/y.md']), 'l4-task1', '索引')
+check('review 前缀不算任务名', extractTaskName(['/repo/run/review/9e496951/review.md']), undefined, '索引')
 check('无产物路径 → 无任务名', extractTaskName([]), undefined, '索引')
 check('结论提取（需修订）', extractConclusion('## 结论：需修订\nS0 问题……'), '需修订', '索引')
 check('结论提取（通过）', extractConclusion('## 结论：通过\n无 S0'), '通过', '索引')

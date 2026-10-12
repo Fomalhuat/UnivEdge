@@ -40,7 +40,7 @@ git clone https://github.com/Fomalhuat/UnivEdge <宿主目录>/UnivEdge
 **人类使用（Web 模式）**——必须先做一次性安装（符号链接，见 [`dsh-adapter/README.md`](dsh-adapter/README.md)「安装」一节），启动时**必须带 `--patch`**（否则只加载 AGENTS.md 的 L0，无 L1 注入）：
 
 ```bash
-cd <dsh 目录>                                  # 如 /data/home/hanwu/deepseek-harness
+cd <dsh 目录>                                  # 即 dsh 的 checkout 目录
 source ~/.nvm/nvm.sh
 export DEEPSEEK_API_KEY='sk-xxx'
 pnpm dsh web --patch <UnivEdge>/dsh-adapter/cordis.patch.yml --no-open
@@ -55,9 +55,9 @@ Web 模式 workspace 在 UI 里选（可任选目录，含 UnivEdge），无 hea
 
 ## 状态
 
-- **内核已成型**。运行规范：`METHODOLOGY.md`（方法论规格 v0.9）与 `VERIFICATION.md`（验证协议 v0.6）——以这两个文件为准；`docs/` 为设计档案与变更史（记录设计决策与历次修订，不随内核同步更新）。
+- **内核已成型**。运行规范：`METHODOLOGY.md`（方法论规格）与 `VERIFICATION.md`（验证协议）——以这两个文件为准（**版本号以各文件头部为准，此处不复制**，以免过期）；`docs/` 为设计档案与变更史（记录设计决策与历次修订，不随内核同步更新）。
 - **与 dsh 结合的测试阶梯 L0-L4 全部验证通过（2026-08-29）**：入口加载 → 渐进披露导航 → 契约/自省 → 门控/评估者/度量 → 真实任务双宿主对比（数值等价、方法论纪律决定性差异）。详见 `dsh-adapter/README.md` 验证记录。
-- 文档见 `docs/`：01 文献调研 → 02 需求细化与蓝图修订 → 03 设计决策与架构约束 → 04 通用 Agent 调研与结构审查 → 07 内核复盘与改进方向（含 08-14 后续修订）。
+- 文档见 `docs/`：01 文献调研 → 02 需求细化与蓝图修订 → 03 设计决策与架构约束 → 04 通用 Agent 调研与结构审查 → 05 运行时契约与组件归属 → 06 部署形态决策 → 07 内核复盘与改进方向 → 08 内核维护工作流 → 09 审查时机判据调研 → 10 锚点原则修订提案 → 11 提交侧增补。
 - 目录骨架已建：`knowledge/`（约定注册表 + 复核教训库）`skills/` `tools/` `config/`；`run/` 为宿主提供的产物存储（可插拔，Step 4B/4C 产物所在）。
 
 ## 路线
