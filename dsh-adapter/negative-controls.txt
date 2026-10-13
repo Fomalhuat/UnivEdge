@@ -5,3 +5,6 @@
 Wittek2024-式(40)判据 | ?run/lit-wittek2024-eq40/repro/verify_eq40.py | s/dPsi\[1\] + xd\[0\]\*dPsi\[0\]/dPsi[1] - xd[0]*dPsi[0]/
 # 待办（R7 S1-4/S1-8）：为审查插件各门（P0-B 去重 / 复用判定 / 漂移 / quiet-force）各登记一条**版本库内**目标。
 Wittek2024-字形映射 | ?run/lit-wittek2024-eq40/repro/check_glyph_mapping.py | s/if not m.group(1).isalpha():/if m.group(1).isalpha():/
+# 2026-10-13（docs/13 提案 C+D）：两条**版本库内**目标（改善"注册表无可选目标"的覆盖面）
+评估者 prompt 输出格式 7 项（R2 第 7 项须在场） | dsh-adapter/tools/check-reviewer-prompt.py | s#实质发现计数#已删除#
+核验表条目提取（只保证不漏条、不代为判定） | dsh-adapter/tools/extract-review-entries.py | s#ROW_RE = re.compile(r'\^S\[0-2\]#ROW_RE = re.compile(r'\^X[0-2]#
