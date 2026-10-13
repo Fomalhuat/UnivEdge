@@ -47,6 +47,69 @@ else:
     if not versioned:
         fails.append('负控注册表中没有版本库内目标（全部带 ? 前缀）')
 
+# ④ R2 计数行（docs/13 Q4a；2026-10-13 用户批准）：D 只验 prompt 内含第 7 项，**产出侧无人核验**。
+#    判据：晚于**最近一次 `apply called`**（进程加载插件的时刻）产出的报告，其正文必须含 `实质发现计数` 行。
+#    无适用报告时**不报错**（过渡期常态）——避免在"下一次审查尚未发生"时制造假红。
+#    `UNIVEDGE_COUNT_CUTOFF=<ISO|unix>` 可覆盖基准时刻；`--self-test` 用临时夹具证明本判据会响。
+import os, time
+def _cutoff() -> float:
+    env = os.environ.get('UNIVEDGE_COUNT_CUTOFF')
+    if env:
+        try: return float(env)
+        except ValueError: return time.mktime(time.strptime(env, '%Y-%m-%dT%H:%M:%SZ')) - time.timezone
+    log = pathlib.Path(os.environ.get('UNIVEDGE_REVIEWER_LOG', '/tmp/univedge-reviewer.log'))
+    best = 0.0
+    if log.exists():
+        for line in log.read_text(errors='ignore').splitlines()[-2000:]:
+            if 'apply called' in line:
+                m = re.match(r'\[(\S+?)\]', line)
+                if m:
+                    try: best = max(best, time.mktime(time.strptime(m.group(1)[:19], '%Y-%m-%dT%H:%M:%S')) - time.timezone)
+                    except ValueError: pass
+    return best
+
+def _feature_live() -> tuple[bool, float]:
+    """第 7 项是否**已在运行进程中生效**：源文件须含该项，且最近一次 apply 晚于源改动。
+    否则任何报告都不可能含该行（进程仍是旧 prompt）→ 判据应**跳过**而非报红。"""
+    src = ROOT/'dsh-adapter/univedge-reviewer.ts'
+    if not src.exists() or '实质发现计数' not in src.read_text(errors='ignore'):
+        return False, 0.0
+    src_m = src.stat().st_mtime
+    cut = _cutoff()
+    return (cut >= src_m), max(cut, src_m)
+
+def _check_count_line(reports_dir: pathlib.Path, cutoff: float) -> list[str]:
+    out = []
+    for f in sorted(reports_dir.glob('*/*/review.md')):
+        if f.stat().st_mtime <= cutoff: continue
+        txt = f.read_text(errors='ignore')
+        if '实质发现计数' not in txt:
+            try: rel = f.relative_to(ROOT)
+            except ValueError: rel = f          # 自验证夹具在 /tmp，不属于仓库
+            out.append(f'{rel}: 晚于最近一次 apply 的报告缺 `实质发现计数` 行（R2 第 7 项）')
+    return out
+
+if '--self-test' in sys.argv:
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        d = pathlib.Path(td) / 'a' / 'b'; d.mkdir(parents=True)
+        r = d / 'review.md'
+        r.write_text('无该行的报告'); r.touch()
+        bad = _check_count_line(pathlib.Path(td), 0.0)
+        r.write_text('实质发现计数：2（明细：S0-1、S1-3）')
+        good = _check_count_line(pathlib.Path(td), 0.0)
+    ok = (len(bad) == 1 and len(good) == 0)
+    print(('✅' if ok else '❌') + f' ④ 自验证：缺行报告被判失败={len(bad)==1}，含行报告通过={len(good)==0}')
+    sys.exit(0 if ok else 1)
+
+live, cut = _feature_live()
+if not live:
+    print('R2 计数行：⏭ 跳过——第 7 项尚未在运行进程中生效（需重启 dsh；重启后本项自动生效）')
+else:
+    applicable = [f for f in (ROOT/'run/review').glob('*/*/review.md') if f.stat().st_mtime > cut] if (ROOT/'run/review').exists() else []
+    fails += _check_count_line(ROOT/'run/review', cut)
+    print(f'R2 计数行：适用报告 {len(applicable)} 份（基准＝最近一次 apply called，且晚于源改动）')
+
 print(f'证据文件检查 {checked} 份')
 if fails:
     print('❌ 不变量不成立：')

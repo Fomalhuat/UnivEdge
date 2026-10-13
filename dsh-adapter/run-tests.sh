@@ -237,6 +237,15 @@ else
   failed=1
 fi
 
+# ---- 第六项附：仓库不变量的自验证（判据会响的证据；docs/13 Q4a）----
+inv_st="test-results/${DATE_PREFIX}-invariants-selftest.md"
+if python3 tools/check-repo-invariants.py --self-test > "$inv_st" 2>&1; then
+  printf '%-28s %s\n' "invariants self-test" "✅ $(tail -1 "$inv_st")  → $inv_st"
+else
+  printf '%-28s %s\n' "invariants self-test" "❌ $(tail -1 "$inv_st")  → $inv_st"
+  failed=1
+fi
+
 # ---- 门输出落盘 ----
 gatefile="test-results/${DATE_PREFIX}-gates.md"
 { echo "# 门输出（契约提醒 / 计数一致性）"; echo; echo '```'; printf '%s' "${GATES:-（无告警）}"; echo '```'; } > "$gatefile"
