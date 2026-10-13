@@ -451,6 +451,11 @@ function buildReviewerPrompt(root: string, input: { task: string; finalReply: st
     '4. S2 建议项（如有）',
     '5. 逐条检查意见摘要（对照 VERIFICATION 检查项）',
     '6. 解耦声明：说明你在独立上下文运行，仅见审查输入包与产物文件（L2 上下文解耦），未见过主 agent 的推理链。',
+    // R2（docs/12，2026-10-13）：让 work-types.md 的毕业计数有数据来源——否则计数依赖事后人工回填、必然空转
+    '7. **实质发现计数**：给出独立一行 `实质发现计数：N（明细：…）`。口径见 `knowledge/work-types.md §1`：'
+    + '**仅计**经 §5.6 意见核验裁决为 ✅ 成立、**且**影响结论 / 数据 / 误差预算 / 状态标签者；'
+    + '格式 / 措辞 / 排版 / 风格类**不计**，核验裁决为 ❌ / ⚠️ 的**不计**。'
+    + '（该行供工作类型状态表做 capability → regression 毕业判定；最终值由生成者在意见核验后确定。）',
   ]
   return lines.join('\n')
 }
