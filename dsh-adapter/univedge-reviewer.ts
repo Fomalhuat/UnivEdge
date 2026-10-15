@@ -48,6 +48,10 @@ const AUTO_MIN_GAP_MIN = Number(process.env.UNIVEDGE_REVIEW_AUTO_GAP_MIN ?? 30)
 const reviewedHashes = new Map<string, string>()
 // P0-A 冷却期状态：sessionId -> 成功审查时间戳（升序，只留窗口内）
 const successTimes = new Map<string, number[]>()
+/** 上次**审查触发**时刻（含失败；2026-10-15 新增）——间隔判据须基于"触发"而非"成功"：
+ *  实证 10-14 三轮审查因作用域回归全部落空（未记成功）→ 间隔窗口从未生效 → 24 / 32 min 内连触 3 次，
+ *  每次都让主流程等满 8 min。含失败才能真正约束频率。 */
+const lastTriggerAt = new Map<string, number>()
 // 裁决 2（2026-10-10）：最近一次成功审查的目标（声明清单 + 各产物指纹）——
 // 供 declared 通道"同清单 + 同指纹 → 复用上轮结论"判定；`--force-review` 可强制重审。
 const lastReview = new Map<string, { paths: string[]; fingerprints: Record<string, string>; childId: string; at: number }>()
@@ -60,10 +64,15 @@ const hourlyCounts = new Map<string, { hour: string; count: number }>()
  *  但**模块级**函数 `collectLateReport()` 也引用它 → 跨作用域 → 运行时 `ReferenceError`
  *  → 被裸 `catch` 吞掉 → 毫秒级落"空记录"（回归点 **`552b63c`**；实际后果：3 轮完整审查、
  *  17 条实质发现全被记为「（空）」，并因连败触发熔断跳过后续 turn 的审查）。
- *  改为**函数**：既修复作用域，又保留"每次读取环境变量"的原语义（单一来源）。 */
+ *  改为**函数**：既修复作用域，又保留"每次读取环境变量"的原语义（单一来源）。
+ *  **2026-10-15（异步化）**：默认由 8 min 降为 **90 s**——主路径只做"快速尝试"；实测评估者耗时
+ *  4–16 min，故绝大多数审查转入**迟到回收**（上限 30 min，见 `lateCollectTimeoutMs()`）。
+ *  报告另有**独立回执通道**（`subagent-report`；本次三轮实证均到达主会话），故主路径超时
+ *  **不会丢结论**，只是插件侧落盘改由迟收完成。
+ *  动机：实测每次审查让主流程等满 8 min、10-14 三轮累计约 24 min 且零产出（han："大量时间在等待审查"）。 */
 function reviewTimeoutMs(): number {
   const t = Number(process.env.UNIVEDGE_REVIEW_TIMEOUT_MS)
-  return Number.isFinite(t) && t > 0 ? t : 480_000
+  return Number.isFinite(t) && t > 0 ? t : 90_000   // 2026-10-15：480_000 → 90_000（异步化）
 }
 
 /** 迟到报告回收的等待上限（2026-10-15 新增，**与主路径超时分离**）——实测评估者耗时 9–16 min，
@@ -117,6 +126,7 @@ function underHourlyLimit(sessionId: string): boolean {
 }
 
 function countReview(sessionId: string): void {
+  lastTriggerAt.set(sessionId, Date.now())   // 2026-10-15：间隔判据基于"触发"（含失败），非"成功"
   const hour = new Date().toISOString().slice(0, 13)
   const rec = hourlyCounts.get(sessionId)
   if (!rec || rec.hour !== hour) hourlyCounts.set(sessionId, { hour, count: 1 })
@@ -553,11 +563,13 @@ export function apply(ctx: Context): void {
     // 且距上次任何成功审查 ≥ AUTO_MIN_GAP_MIN 才启用 auto。实测旧阈值（15min/2 次 ≈ 每 5 分钟一次）
     // 与"同一任务连续修订"节奏不匹配：两次 auto 相隔仅 4 分 49 秒，第二次触发时窗口内只计到 1 次
     // 成功（另一轮由 declared 触发）→ 冷却未拦（账本 §2.1 R3）。
-    const successes = successTimes.get(session.id) ?? []
-    const lastSuccessAt = successes.length ? successes[successes.length - 1] : 0
-    if (lastSuccessAt && Date.now() - lastSuccessAt < AUTO_MIN_GAP_MIN * 60 * 1000) {
-      const gapMin = ((Date.now() - lastSuccessAt) / 60000).toFixed(1)
-      diag('turn', turn, `auto gap ${gapMin}min < ${AUTO_MIN_GAP_MIN}min since last review, skip`)
+    const successes = successTimes.get(session.id) ?? []   // 供下方 cooldown 判定（P0-A）
+    // 2026-10-15：间隔判据由"上次**成功**"改为"上次**触发**"（含失败）——原实现下失败的审查不占窗口
+    // （实证 10-14 三轮全落空 → 24 / 32 min 内连触 3 次，每次主流程等满 8 min）。含失败才能真正约束频率。
+    const lastTrig = lastTriggerAt.get(session.id) ?? 0
+    if (lastTrig && Date.now() - lastTrig < AUTO_MIN_GAP_MIN * 60 * 1000) {
+      const gapMin = ((Date.now() - lastTrig) / 60000).toFixed(1)
+      diag('turn', turn, `auto gap ${gapMin}min < ${AUTO_MIN_GAP_MIN}min since last review trigger, skip`)
       return
     }
     // P0-A 冷却期（保留为冗余第二道）：窗口内成功审查已达上限 → 跳过（延迟不丢弃；主 agent 聚合修订后下次审查读最新状态）
