@@ -1,7 +1,7 @@
 {
   "note": "L1 义务不变量基线的内容指纹（按 L1 文本本身，非输入整文）；L1 变化后请运行：bash dsh-adapter/run-tests.sh --update-l1-baseline（底层开关 UNIVEDGE_UPDATE_L1_BASELINE=1 由该脚本内部使用）",
-  "l1Chars": 9394,
-  "l1Lines": 221,
-  "l1Sha256_16": "6a4096510c9fdd90",
-  "updatedAt": "2026-10-13T08:25:33.061Z"
+  "l1Chars": 9502,
+  "l1Lines": 222,
+  "l1Sha256_16": "7cdbd28ec3eeecc0",
+  "updatedAt": "2026-10-15T08:44:44.693Z"
 }
