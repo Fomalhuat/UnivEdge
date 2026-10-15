@@ -8,3 +8,4 @@ Wittek2024-字形映射 | ?run/lit-wittek2024-eq40/repro/check_glyph_mapping.py 
 # 2026-10-13（docs/13 提案 C+D）：两条**版本库内**目标（改善"注册表无可选目标"的覆盖面）
 评估者 prompt 输出格式 7 项（R2 第 7 项须在场） | dsh-adapter/tools/check-reviewer-prompt.py | s#实质发现计数#已删除#
 核验表条目提取（只保证不漏条、不代为判定） | dsh-adapter/tools/extract-review-entries.py | s#ROW_RE = re.compile(r'\^S\[0-2\]#ROW_RE = re.compile(r'\^X[0-2]#
+插件类型检查（编译期错误须被 tsc 捕获；2026-10-15，源自"跨作用域引用"真实缺陷） | dsh-adapter/tools/typecheck.sh | s#grep -q "TS2304"#grep -q "TS9999"#

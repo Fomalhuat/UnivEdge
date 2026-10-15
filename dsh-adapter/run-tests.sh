@@ -246,6 +246,17 @@ else
   failed=1
 fi
 
+# ---- 第七项：插件类型检查（编译期错误的静态闸；2026-10-15 新增，源自真实缺陷）----
+# 实证：模块级函数引用函数体内 const → tsx（只转译）不报 → 运行时 ReferenceError →
+# 被裸 catch 吞 → 3 轮完整审查被记为「（空）」（回归点 552b63c，见 run/univedge-usage-*/）。
+tc_st="test-results/${DATE_PREFIX}-typecheck.md"
+if bash tools/typecheck.sh > "$tc_st" 2>&1; then
+  printf '%-28s %s\n' "typecheck (tsc)" "✅ $(tail -1 "$tc_st")  → $tc_st"
+else
+  printf '%-28s %s\n' "typecheck (tsc)" "❌ $(tail -1 "$tc_st")  → $tc_st"
+  failed=1
+fi
+
 # ---- 门输出落盘 ----
 gatefile="test-results/${DATE_PREFIX}-gates.md"
 { echo "# 门输出（契约提醒 / 计数一致性）"; echo; echo '```'; printf '%s' "${GATES:-（无告警）}"; echo '```'; } > "$gatefile"

@@ -56,6 +56,24 @@ let consecutiveFailures = 0
 let circuitOpenUntil = 0
 const hourlyCounts = new Map<string, { hour: string; count: number }>()
 
+/** 评审超时（**模块级**，2026-10-15 修作用域回归）：原为 `runReview()` 体内的 `const`，
+ *  但**模块级**函数 `collectLateReport()` 也引用它 → 跨作用域 → 运行时 `ReferenceError`
+ *  → 被裸 `catch` 吞掉 → 毫秒级落"空记录"（回归点 **`552b63c`**；实际后果：3 轮完整审查、
+ *  17 条实质发现全被记为「（空）」，并因连败触发熔断跳过后续 turn 的审查）。
+ *  改为**函数**：既修复作用域，又保留"每次读取环境变量"的原语义（单一来源）。 */
+function reviewTimeoutMs(): number {
+  const t = Number(process.env.UNIVEDGE_REVIEW_TIMEOUT_MS)
+  return Number.isFinite(t) && t > 0 ? t : 480_000
+}
+
+/** 迟到报告回收的等待上限（2026-10-15 新增，**与主路径超时分离**）——实测评估者耗时 9–16 min，
+ *  主路径 8 min 超时后转入迟收；若迟收沿用同一 8 min，仍可能等不到报告（原实现即如此）。
+ *  `UNIVEDGE_LATE_TIMEOUT_MS` 可覆盖。 */
+function lateCollectTimeoutMs(): number {
+  const t = Number(process.env.UNIVEDGE_LATE_TIMEOUT_MS)
+  return Number.isFinite(t) && t > 0 ? t : 1_800_000   // 30 min
+}
+
 function recordFailure(): void {
   consecutiveFailures += 1
   if (consecutiveFailures >= CIRCUIT_FAIL_THRESHOLD) {
@@ -584,9 +602,8 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
   }
   diag('parent found:', parent.id)
 
-  // 评审超时（第十八轮：默认由 5 分钟放宽到 8 分钟——实测两轮都在 5 分钟处超时、全部走迟到回收；可用环境变量覆盖）
-  const _tmo = Number(process.env.UNIVEDGE_REVIEW_TIMEOUT_MS)
-  const REVIEW_TIMEOUT_MS = Number.isFinite(_tmo) && _tmo > 0 ? _tmo : 480_000   // NaN/非法值回落默认（R7 S2-5）
+  // 评审超时（默认 8 分钟）——2026-10-15：由函数内 `const` 改为调用**模块级** `reviewTimeoutMs()`，修作用域回归
+  const REVIEW_TIMEOUT_MS = reviewTimeoutMs()
   const signal = AbortSignal.timeout(REVIEW_TIMEOUT_MS)
   let childId: string | undefined
 
@@ -772,10 +789,10 @@ async function collectLateReport(ctx: Context, root: string, session: any, child
     persistReport(root, session, childId, immediate, undefined, turn, channel, fingerprints, lateTranscript())
     return
   }
-  // 2) 挂迟到监听（限时 5 分钟）：子代理稍后完成 turn/end 则回收
+  // 2) 挂迟到监听（上限见 lateCollectTimeoutMs()，默认 30 min；2026-10-15 起与主路径超时分离）
   try {
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => { off(); reject(new Error('late report timeout')) }, REVIEW_TIMEOUT_MS)
+      const timer = setTimeout(() => { off(); reject(new Error('late report timeout')) }, lateCollectTimeoutMs())
       const off = ctx.on('session/event', (s: any, ev: any) => {
         if (s?.id === childId && ev?.type === 'turn/end') {
           clearTimeout(timer)
@@ -791,13 +808,17 @@ async function collectLateReport(ctx: Context, root: string, session: any, child
       recordSuccess(session.id) // 迟到回收成功 = 复位失败计数 + 记录成功时间（P0-A）
     } else {
       diag('late turn/end but no report text, persisting empty')
-      recordFailure()
+      diag('late collect: no report text（**不计入熔断**——迟收未见文本 ≠ 评估者失败，其可能仍在运行）')
       persistEmpty(root, session, childId, startSeq, endSeq, channel)
     }
-  } catch {
+  } catch (e) {
     // 3) 迟到超时仍无报告 → 落盘"中止"记录（可诊断）
+    // 2026-10-15：原为**裸 catch**——它把"迟收路径自身的异常"（如作用域 ReferenceError）静默成"超时"，
+    // 致 3 轮完整审查被记为「（空）」且诊断方向被误导（文案曾指向 token 额度/速率限制）。现记录异常本身。
+    diag('late report collect failed:', e instanceof Error ? `${e.name}: ${e.message}` : String(e))
     diag('late report timeout, persisting abort record')
-    recordFailure()
+    // 2026-10-15：**不计入熔断**——迟收超时属"主路径超时后的正常回落"，不是评估失败；
+    // 计入会误开熔断（实证：6 次连败 → CIRCUIT OPEN → 跳过 turn 6 的审查 = 漏审）。
     persistEmpty(root, session, childId, startSeq, endSeq, channel)
   }
 }

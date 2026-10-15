@@ -1,0 +1,21 @@
+# 插件类型检查基线（已知存在、暂不阻断的错误）
+#
+# 语义：`tools/typecheck.sh` 只对**新增**错误（本文件未记录者）判失败。
+#       —— 目的不是"零错误"，而是"**不再新引入**编译期错误"（本次真实缺陷即"新引入的 TS2304"）。
+#
+# 生成：2026-10-15（typecheck.sh 首次运行时的实测快照，标准化为 `文件: 错误码`，去行列以免代码移动误报）
+# 成因：插件长期由 `tsx` 运行（只转译、不做类型检查）→ 类型问题累积无人发现。
+# 处置：以下为**已知技术债**，不属本次修复范围；修完一项即可从本文件删除一行（并留提交记录）。
+#
+# 各项含义：
+#   TS2307 = 找不到模块 `@deepseek-ai/cordis` 的类型声明（环境类：dsh 依赖不在本解析路径）
+#   TS2339 = `extractReviewInput` 返回类型缺 `dropped` / `taskSource` 字段（**真实类型不一致**，值得后续修）
+#   TS2345 = `string | undefined` 传给 `string` 形参（**真实**，与可选参数有关）
+#   TS7006 = 隐式 any 形参（收严 `noImplicitAny` 后会暴露更多）
+#
+# 注：TS2591（缺 @types/node）由脚本统一过滤，不进基线。
+
+univedge-reviewer.ts: error TS2307
+univedge-reviewer.ts: error TS2339
+univedge-reviewer.ts: error TS2345
+univedge-reviewer.ts: error TS7006
