@@ -428,9 +428,27 @@ function turnStartSeq(session: any, turn: number): number {
 }
 
 /** 构造评估者 prompt（怀疑派立场，L2 上下文解耦声明，问题分级）。 */
-function buildReviewerPrompt(root: string, input: { task: string; finalReply: string; artifacts: string[]; fingerprints?: Record<string, string>; snapshotAt: string }): string {
+type ReviewTier = 't1' | 't2'
+
+/** 审查档位（docs/15 §2）：**默认 T1（核对锚点链，不重推）**；T2 = 全量独立重推（原行为）。
+ *  来源：① 声明文本中的 `tier=t2` / `--review-t2`（生成者判断需全量时显式指定）；
+ *  ② 环境变量 `UNIVEDGE_REVIEW_TIER=t2`（全局默认）。 */
+export function reviewTier(declared: string[] = []): ReviewTier {
+  const s = declared.join(' ')
+  if (/\btier\s*=\s*t2\b|--review-t2\b/.test(s)) return 't2'
+  if (/\btier\s*=\s*t1\b|--review-t1\b/.test(s)) return 't1'
+  return process.env.UNIVEDGE_REVIEW_TIER === 't2' ? 't2' : 't1'
+}
+
+export function buildReviewerPrompt(root: string, input: { task: string; finalReply: string; artifacts: string[]; fingerprints?: Record<string, string>; snapshotAt: string }, tier: ReviewTier = 't1'): string {
   const lines = [
     '你是 UnivEdge 的独立审查评估者（R7，怀疑派）。以下是主 agent 完成物理科研任务后的审查请求。',
+    '',
+    `【**档位：${tier === 't1' ? 'T1 锚点链核对（不重推）' : 'T2 全量独立审查'}**；依据 docs/15 §2】`,
+    ...(tier === 't1'
+      ? ['本档**只核对锚点链**，**不重推推导、不重算数值**（见下方清单）；'
+         + '若判断需独立重推才能定论，请在报告中**建议升级 T2**（依据 docs/15 §2）。']
+      : ['本档为全量独立审查：可独立重推推导链、复算数值、逐项对照 VERIFICATION 检查项。']),
     '',
     '【立场】产物"合格" = 你找不出实质性问题。你的职责是尽力找出问题（锚点缺失、手算代替工具、约定/量纲错误、验证失效、假设未声明等），而不是确认工作。',
     '',
@@ -459,10 +477,19 @@ function buildReviewerPrompt(root: string, input: { task: string; finalReply: st
     `- 组包快照时间：${input.snapshotAt}（产物状态以此为准；指纹见上）`,
     '- 外部锚点通道（可自行复核）：① dsh 会话日志 `$DSH_SESSION_JSONL` 的 `request/header`（记录完整系统提示）与 `assistant/message.usage`（token 计量）；② 插件诊断日志 `/tmp/univedge-*.log`；③ `git log/show`（历史状态重建）',
     '',
-    '【审查清单（第 ③ 要素）：请逐项给 pass/fail/need_human/n-a】',
-    'RC-01 生成-审查解耦（分级声明）、RC-02 可打分判定、RC-03 分歧日志、RC-04 交叉验证独立性、',
-    'RC-05 测试设计审查（因素枚举/独立性/判据可判定/方法盲区/锚点充分）、RC-06 根因宣布协议、RC-07 意见核验、',
-    'CC-01 约定一致性、NC-04/NC-05 环境与运行链、NC-06 外部锚点对照、§0.4 产物四要素、§1.2 任务契约。',
+    tier === 't1'
+      ? '【锚点链核对清单（本档唯一任务）：四问，逐条给结论】——**不重推推导、不重算数值**'
+      : '【审查清单（第 ③ 要素）：请逐项给 pass/fail/need_human/n-a】',
+    ...(tier === 't1'
+      ? ['① 每条**结论**是否都显式给出锚点？（缺 → S1）',
+         '② 锚点的**等级**（A0–A3，见 METHODOLOGY §0.2）标注是否正确？（把 A0 自洽 / 低阶估计标成高阶 → S0）',
+         '③ 锚点的**有效域**是否覆盖该结论？（越界 → S0）',
+         '④ **结论强度 ≤ 锚点强度**？（以 A0 自洽或低阶估计支撑高阶结论 → S0）',
+         '　例外：四问中任一问**直接指向某个具体数字**时，才**只对该数字**做独立复算。',
+         '　若判断本次属"高代价裁决点"、T1 不足以判定，请在报告中说明并**建议升级 T2**。']
+      : ['RC-01 生成-审查解耦（分级声明）、RC-02 可打分判定、RC-03 分歧日志、RC-04 交叉验证独立性、',
+         'RC-05 测试设计审查（因素枚举/独立性/判据可判定/方法盲区/锚点充分）、RC-06 根因宣布协议、RC-07 意见核验、',
+         'CC-01 约定一致性、NC-04/NC-05 环境与运行链、NC-06 外部锚点对照、§0.4 产物四要素、§1.2 任务契约。']),
     '',
     '【假设与有效域（第 ④ 要素）】：若本次交付含任务契约（如 `run/*/contract.md`），请读取其中的',
     '「假设清单 / 有效域 / 误差预算 / 锚点引用」四要素并据此判断产物是否越出有效域；缺失则作为 S1/S2 提出。',
@@ -477,7 +504,9 @@ function buildReviewerPrompt(root: string, input: { task: string; finalReply: st
     '2. S0 实质问题清单（如有）：每条含严重程度 + 证据 + 建议 + 【需用户确认】',
     '3. S1 有依据问题（如有）：每条含依据出处 + 修正建议',
     '4. S2 建议项（如有）',
-    '5. 逐条检查意见摘要（对照 VERIFICATION 检查项）',
+    tier === 't1'
+      ? '5. 锚点链核对表：逐条给出「结论 | 锚点 | 等级(A0–A3) | 有效域覆盖? | 强度匹配?」及四问结论'
+      : '5. 逐条检查意见摘要（对照 VERIFICATION 检查项）',
     '6. 解耦声明：说明你在独立上下文运行，仅见审查输入包与产物文件（L2 上下文解耦），未见过主 agent 的推理链。',
     // R2（docs/12，2026-10-13）：让 work-types.md 的毕业计数有数据来源——否则计数依赖事后人工回填、必然空转
     '7. **实质发现计数**：给出独立一行 `实质发现计数：N（明细：…）`。口径见 `knowledge/work-types.md §1`：'
@@ -606,7 +635,9 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
     return
   }
 
-  const prompt = buildReviewerPrompt(root, input)
+  const tier = reviewTier(declaredPaths)
+  diag('review tier:', tier)
+  const prompt = buildReviewerPrompt(root, input, tier)
   const parent = ctx.agents.get(session.id) as any
   if (!parent) {
     diag('parent agent not found in registry')
