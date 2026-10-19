@@ -1,7 +1,7 @@
 # 时效抽查（B6）：用 2026 年证据检验最老的三条结论
 
 - **元数据**：2026-10-19 执行；目的 = 回答 han"材料是否够新"的质疑；
-  五来源均为 2026 年（1–10 月），一手；快照见 `run/survey/sources/b6-*`。
+  五来源均为 2026 年（1–10 月），一手；快照见 `run/survey/sources/b6-2601.03315-abs.html`、`run/survey/sources/b6-2606.13685-abs.html`、`run/survey/sources/b6-2606.19544-abs.html`、`run/survey/sources/b6-2608.14905-abs.html`、`run/survey/sources/b6-nature-aiscientist.html`、`run/survey/sources/b6-nature.txt`。
 - **方法**：挑选"最可能导致设计改变且依赖 2023 证据"的三条结论，检索 2026 年是否有更新/反驳；
   另查 AI4Science 侧 2026 年新评估。
 

@@ -52,8 +52,8 @@
 | force：同上，assistant 的行首指令不生效 | false | false | S0-fix | ✅ |
 | force：用户消息行首指令生效 | true | true | S0-fix | ✅ |
 | 生产形状：hasDeliverable 认得 arguments 里的产物路径（旧实现为 false） | true | true | S0-1 | ✅ |
-| 生产形状：artifactPathsOfTurn 取出该路径（旧实现为 []） | /tmp/tc-q1qaWW/run/task-a/artifact.md | /tmp/tc-q1qaWW/run/task-a/artifact.md | S0-1 | ✅ |
-| 向后兼容：旧夹具形状（参数摊在 data 上）仍可解析 | /tmp/tc-q1qaWW/run/task-a/artifact.md | /tmp/tc-q1qaWW/run/task-a/artifact.md | S0-1 | ✅ |
+| 生产形状：artifactPathsOfTurn 取出该路径（旧实现为 []） | /tmp/tc-61EqrT/run/task-a/artifact.md | /tmp/tc-61EqrT/run/task-a/artifact.md | S0-1 | ✅ |
+| 向后兼容：旧夹具形状（参数摊在 data 上）仍可解析 | /tmp/tc-61EqrT/run/task-a/artifact.md | /tmp/tc-61EqrT/run/task-a/artifact.md | S0-1 | ✅ |
 | 生产形状：去重门的前置（路径集合）不再为空 | true | true | S0-1 | ✅ |
 | 收窄：写内核文档 docs/*.md → **不**触发（判别夹具） | false | false | narrow | ✅ |
 | 收窄：写任务产出 run/<任务>/*.md → 触发 | true | true | narrow | ✅ |

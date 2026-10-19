@@ -2,8 +2,8 @@
 
 - **元数据**：Princeton + Stanford ｜ 论文 arXiv 2405.15793（NeurIPS 2024）｜ 代码 `SWE-agent/SWE-agent`
   （main 分支，2026-10-16 获取）；后继 `SWE-agent/mini-swe-agent`（v2）
-  ｜ 一手（论文 + 仓库代码）｜ 快照 `run/survey/sources/b1-sweagent-{readme.md,history.py,arxiv.html}`、
-  `b1-miniswe-readme.md`（sha256 前 16 位：readme `dcd880557720efba`、history.py `8e3621a9b7d94761`、
+  ｜ 一手（论文 + 仓库代码）｜ 快照 `run/survey/sources/b1-sweagent-readme.md`、`run/survey/sources/b1-sweagent-history.py`、`run/survey/sources/b1-sweagent-arxiv.html`、
+  `run/survey/sources/b1-miniswe-readme.md`（sha256 前 16 位：readme `dcd880557720efba`、history.py `8e3621a9b7d94761`、
   miniswe-readme `9982d90b7566f2f3`）
 - **备注**：⚠️ 重要时效信息——SWE-agent 已被自家 mini 版本取代（仓库首页警告）；
   mini 与 SWE-agent 性能相当而**简单约 100 倍**。

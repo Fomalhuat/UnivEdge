@@ -430,23 +430,23 @@
 | B2-6 | Anthropic, Scaling Managed Agents | anthropic.com/engineering/managed-agents | `3307de45eb754901`(txt) | cards/anthropic-managed-agents.md |
 | B2-7 | Anthropic, Building effective human-agent teams（2026-06-24） | claude.com/blog/building-effective-human-agent-teams | `2b078ba5b0f2784d`(txt) | cards/anthropic-human-agent-teams.md |
 | B3-1a | Zheng et al., Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena（arXiv 2306.05685） | arxiv.org/abs/2306.05685 | `e47c52fd43c514c6`(txt) | cards/llm-as-judge-reliability.md |
-| B3-1b | Wang et al., Large Language Models are not Fair Evaluators（arXiv 2305.17926） | arxiv.org/abs/2305.17926 | `9cb7e731f3a65c6f`(txt) | 同上（合并卡） |
+| B3-1b | Wang et al., Large Language Models are not Fair Evaluators（arXiv 2305.17926） | arxiv.org/abs/2305.17926 | `9cb7e731f3a65c6f`(txt) | cards/llm-as-judge-reliability.md |
 | B3-2 | Huang et al., LLMs Cannot Self-Correct Reasoning Yet（arXiv 2310.01798） | arxiv.org/abs/2310.01798 | `50e4fd99abc758a0`(txt) | cards/llm-self-correction-limits.md |
 | B3-3 | Kirchner et al., Prover-Verifier Games improve legibility（arXiv 2407.13692） | arxiv.org/abs/2407.13692 | `271afc9c50d7099b`(txt) | cards/prover-verifier-games.md |
 | B3-4 | Lightman et al., Let's Verify Step by Step（arXiv 2305.20050） | arxiv.org/abs/2305.20050 | `2c655549ad77ae67`(txt) | cards/process-supervision.md |
 | B4-1 | Voyager（arXiv 2305.16291） | arxiv.org/abs/2305.16291 | `6cfab0fdc8ffd7bf`(txt) | cards/voyager.md |
 | B4-2a | Reflexion（arXiv 2303.11366） | arxiv.org/abs/2303.11366 | `8971b0e5a498cbe1`(txt) | cards/experiential-learning.md |
-| B4-2b | ExpeL（arXiv 2308.10144） | arxiv.org/abs/2308.10144 | `3e78b5dd45a63280`(txt) | 同上（合并卡） |
+| B4-2b | ExpeL（arXiv 2308.10144） | arxiv.org/abs/2308.10144 | `3e78b5dd45a63280`(txt) | cards/experiential-learning.md |
 | B4-3a | MemGPT（arXiv 2310.08560） | arxiv.org/abs/2310.08560 | `d8b1acdc0b4f4796`(txt) | cards/memory-architectures.md |
-| B4-3b | Generative Agents（arXiv 2304.03442） | arxiv.org/abs/2304.03442 | `233470c77d221ae4`(txt) | 同上（合并卡） |
+| B4-3b | Generative Agents（arXiv 2304.03442） | arxiv.org/abs/2304.03442 | `233470c77d221ae4`(txt) | cards/memory-architectures.md |
 | B4-4 | METR, Measuring AI Ability to Complete Long Software Tasks（arXiv 2503.14499） | arxiv.org/abs/2503.14499 | `e52de524a5e7cae1`(txt) | cards/metr-time-horizon.md |
 | B5-1 | Beel et al., Evaluating Sakana's AI Scientist（arXiv 2502.14297） | arxiv.org/abs/2502.14297 | `e93f9dbdbb28264c`(txt) | cards/beel-ai-scientist-evaluation.md |
 | B5-2a | Si et al., Can LLMs Generate Novel Research Ideas?（arXiv 2409.04109） | arxiv.org/abs/2409.04109 | `00ce2b613b9692ca`(txt) | cards/research-idea-evaluation-gap.md |
-| B5-2b | Si et al., The Ideation–Execution Gap（arXiv 2506.20803） | arxiv.org/abs/2506.20803 | `9020d8160bb6f2a4`(txt) | 同上（合并卡） |
+| B5-2b | Si et al., The Ideation–Execution Gap（arXiv 2506.20803） | arxiv.org/abs/2506.20803 | `9020d8160bb6f2a4`(txt) | cards/research-idea-evaluation-gap.md |
 | B5-3 | Cemri et al., Why Do Multi-Agent LLM Systems Fail?（arXiv 2503.13657） | arxiv.org/abs/2503.13657 | `6ac4a8fba1085f3f`(txt) | cards/mast-failure-taxonomy.md |
 | B5-4 | Siegel et al., CORE-Bench（arXiv 2409.11363） | arxiv.org/abs/2409.11363 | `de90d8c3138abe8a`(txt) | cards/core-bench-reproducibility.md |
 | B6-1 | Reliability without Validity（arXiv 2606.19544，2026-06） | arxiv.org/abs/2606.19544 | `b406c16b4c5e2a64`(html) | cards/freshness-check-2026.md |
-| B6-2 | The Coin Flip Judge?（arXiv 2606.13685，2026-06） | arxiv.org/abs/2606.13685 | `08aacaaccb2d1929`(html) | 同上 |
-| B6-3 | Why LLMs Aren't Scientists Yet（arXiv 2601.03315，2026-01） | arxiv.org/abs/2601.03315 | `f536349c28d5df91`(html) | 同上 |
-| B6-4 | How Do Agents Fail on AutoResearch（arXiv 2608.14905，2026-08） | arxiv.org/abs/2608.14905 | `3fcce9d8b93d9c7f`(html) | 同上 |
-| B6-5 | Nature, Towards end-to-end automation of AI research（s41586-026-10265-5，2026-03） | nature.com/articles/s41586-026-10265-5 | `9575a3aa26d4848b`(html) | 同上 |
+| B6-2 | The Coin Flip Judge?（arXiv 2606.13685，2026-06） | arxiv.org/abs/2606.13685 | `08aacaaccb2d1929`(html) | cards/freshness-check-2026.md |
+| B6-3 | Why LLMs Aren't Scientists Yet（arXiv 2601.03315，2026-01） | arxiv.org/abs/2601.03315 | `f536349c28d5df91`(html) | cards/freshness-check-2026.md |
+| B6-4 | How Do Agents Fail on AutoResearch（arXiv 2608.14905，2026-08） | arxiv.org/abs/2608.14905 | `3fcce9d8b93d9c7f`(html) | cards/freshness-check-2026.md |
+| B6-5 | Nature, Towards end-to-end automation of AI research（s41586-026-10265-5，2026-03） | nature.com/articles/s41586-026-10265-5 | `9575a3aa26d4848b`(html) | cards/freshness-check-2026.md |

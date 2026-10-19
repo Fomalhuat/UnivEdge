@@ -132,6 +132,8 @@
   agent 没漏写关键步骤（`critical_steps` 完整性靠契约审查 + 领域判断）。这是本方案的最后人工环节，
   已在 `docs/17 §7 U3` 标注，不假装解决。
 - 需在远程 dsh 上跑 `run-tests.sh` 复核 L1 基线（本机无 dsh）。
+- **2026-10-19 首次实战（dogfooding）**：流程判定 T1+scripts 可用、审查 <2 min；但独立弱审查者发现
+  **负控是声明而非执行**（G1）与 `high_cost=false` 可敷衍（G3）。见 `docs/19`；**v0.17（G1+G3）已实施**（`tools/review_depth.py --run`），见 `docs/19 §4`。
 
 ## 5. 验证状态与下一步
 
