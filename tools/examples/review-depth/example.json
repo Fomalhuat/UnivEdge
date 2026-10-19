@@ -1,0 +1,29 @@
+{
+  "task": "rp12-fem-verify",
+  "artifact_id": "run/rp12/report.md",
+  "critical_steps": ["S1-h-convergence", "S2-L-convergence", "S3-final-dt"],
+  "criteria": [
+    {"step": "S1-h-convergence", "criterion": "拟合收敛阶 p >= 3.5", "anchor_id": "bench:rp12-dt",
+     "anchor_source": "arxiv:0803.0439 eq.(12)", "tolerance": "p >= 3.5",
+     "judge_mode": "script", "exec_cmd": "python tools/checks/hconv.py run/rp12/h.json",
+     "last_result": "pass", "negative_control": "把 h 序列末项改坏 → 必须 fail",
+     "negative_control_result": "fail"},
+    {"step": "S2-L-convergence", "criterion": "L=24..30 的 d_t 变化 < 1e-3 相对", "anchor_id": "claim:C-12",
+     "anchor_source": "claim:C-12", "tolerance": "rel < 1e-3",
+     "judge_mode": "human", "decision_rule": "逐 L 列表并计算相对变化；任一 >1e-3 则 fail",
+     "human_confirmed_by": "han", "negative_control": "n/a"},
+    {"step": "S3-final-dt", "criterion": "d_t 与 PRD77 Table I 偏差 < 1%", "anchor_id": "bench:prd77-t1",
+     "anchor_source": "file:knowledge/benchmarks.md", "tolerance": "rel <= 1e-2",
+     "judge_mode": "script", "exec_cmd": "python tools/checks/anchor_table.py run/rp12/anchor.json",
+     "last_result": "pass", "negative_control": "把 reference 改成 10 倍 → 必须 fail",
+     "negative_control_result": "fail"}
+  ],
+  "high_cost": {
+    "irreversible_action": {"value": false, "evidence": "none"},
+    "downstream_amplification": {"value": true, "evidence": "file:knowledge/claims.md"},
+    "conclusionization": {"value": true, "evidence": "file:docs/17-survey-closing-and-decision-package.md"},
+    "handoff": {"value": false, "evidence": "none"},
+    "convention_change": {"value": false, "evidence": "none"},
+    "cost_threshold": {"est_gpu_hours": 1, "batch_runs": 3, "source": "file:tools/examples/review-depth/demo.slurm"}
+  }
+}

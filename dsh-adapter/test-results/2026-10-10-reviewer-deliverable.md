@@ -1,6 +1,6 @@
 # reviewer 逻辑单元测试结果（shared 模块）
 
-- 日期：2026-10-15
+- 日期：2026-10-19
 - 命令：`tsx --tsconfig <dsh>/tsconfig.json tests/reviewer-deliverable.ts`
 - 覆盖：触发判据（A/B 层）+ 缺陷 2/3/4 + S1-1/S1-4/S1-5 + S2-2 + INDEX 创建/追加/并发 + 共享模块单一事实来源（S1-2）+ 风暴抑制（quiet/冷却/hash/r7-）+ @review 声明通道
 
@@ -122,7 +122,7 @@ S0 问题清单……
 | 声明解析：讨论里引述真实路径但无 @review → 不构成声明 | 0 | 0 | S0-1 | ✅ |
 | 声明解析：通配符不是路径 | 0 | 0 | S0-1 | ✅ |
 | 声明解析：非 ASCII（中文）路径必须被解析 | 1 | 1 | S0-1 | ✅ |
-| 声明：相对路径按 session cwd 解析（不依赖 process.cwd） | /tmp/cwdrel-ne4fRV/dsh-adapter/x.ts | /tmp/cwdrel-ne4fRV/dsh-adapter/x.ts | S0-1 | ✅ |
+| 声明：相对路径按 session cwd 解析（不依赖 process.cwd） | /tmp/cwdrel-aS7FY3/dsh-adapter/x.ts | /tmp/cwdrel-aS7FY3/dsh-adapter/x.ts | S0-1 | ✅ |
 | 声明：解析成功后不再出现在 dropped | 0 | 0 | S0-1 | ✅ |
 | 声明：相对路径也被记录指纹 | string | string | S0-1 | ✅ |
 | 声明解析：含空格的中文路径不会被截断成子串 | false | false | S0-1 | ✅ |
