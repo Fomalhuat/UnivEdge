@@ -8,7 +8,7 @@
 - 边界：本测试是代理判据——保证"义务与判据文字仍在 L1 中"，**不**保证模型遵守，**不**覆盖同义改写的弱化
 - **基线 = L1 内容指纹**（`test-results/l1-baseline.json`；L1 变化后运行 `bash dsh-adapter/run-tests.sh --update-l1-baseline` 刷新）
 - 以下为**输入整文件**指纹（仅供参考，**不**作为判据——切片外改动不应触发过期）：
-  - `METHODOLOGY.md` → 44424B/2026-10-19T08:50:06.000Z/ab720b90b28c
+  - `METHODOLOGY.md` → 44528B/2026-10-19T09:31:18.000Z/9fd9080fea25
   - `knowledge/review-lessons.md` → 22596B/2026-10-12T08:05:39.747Z/1bc798c6e204
 
 | 组 | 义务 | 断言文本 | 结果 |

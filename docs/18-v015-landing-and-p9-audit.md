@@ -27,6 +27,7 @@
 >
 > **实情**：v0.15 净增 **675**（9,502 → 10,177）**未做等量删减**；v0.16 内部净 -14；v0.17 再净 -20（→ 10,143）。
 > "等量删减"作为**实践约定**仍被遵守（v0.17 即为例），但**不应表述为 docs/08 的成文政策**。
+> **v0.17 最终数值**：METHODOLOGY **10,143 字符 / 238 行**，基线指纹 `a906290f074e4535`（详见 `docs/19 §4`）。
 > 注：本机无 dsh checkout，无法运行 `run-tests.sh --update-l1-baseline`；基线由**复算 `readL1()`
 > 同一算法**得到（Python 复现：METHODOLOGY §0–§1 + review-lessons 基层 + CONFIRM_DISCIPLINE；
 > 无非 BMP 字符，len 与 JS `.length` 一致）。**需在远程 dsh 上跑一次 `run-tests.sh` 复核**
