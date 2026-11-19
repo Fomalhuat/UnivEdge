@@ -38,6 +38,7 @@ bash dsh-adapter/run-tests.sh --dsh <checkout>     # 指定 dsh checkout（默�
 | `l1-invariants` | 149 | L1 义务不变量（关键词 + 定义级 + 依赖闭包）+ **第 H 组证据新鲜度门** |
 | `reviewer-deliverable` | 129 | 触发判据/声明解析（含**目录声明**）/组包/指纹/漂移/复用等纯逻辑 |
 | `reviewer-decision-gates` | 66 | 四项裁决（漂移即失效 / 同目标复用 / auto 间隔 / 全文落盘）+ **W1 检查项接线**（T1 ⓿ SC-07 / T2 +RC-08,SC-07）+ **W2 契约驱动档位判定**（10 例：coverage=1→t1 / 覆盖不足+高代价→t2 / **全覆盖+高代价→t2** / 显式 t1 不自降 / 无契约→t1 / 显式 t2→t2 / 工具缺失→fail-closed t2 / **声明目录→找到契约** / **最近祖先优先** / **目录展开为文件**） |
+| `self-check-gate` | 4 | P26 自审处置门：`fixed`（附证据）/ `waived`（附理由）/ `open`（拒绝） |
 | `review-depth-fixtures` | 10 | `review_depth.py` 的档位判别集（t1…t11）：exec 失败/负控静默/高代价各通道/成本冲突取高（**t11 = S0-1 回归**） |
 | `review-declare.sh` | 12 | 声明生成器自验证（基线取 INDEX 且按 UTC 解释 / 分类白名单 / 降级告警与退出码 / 证据产物排除） |
 | `tools/negative-control.sh` | — | **负控门**（判据可响性）：注册表 `negative-controls.txt` 中每个判据脚本须"原样成功 ∧ **施加破坏式后失败**"；三个探针已验证它会响：假变异 → "未命中"、恒真判据 → "不会响" |

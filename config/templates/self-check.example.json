@@ -1,0 +1,7 @@
+{
+  "task": "example",
+  "findings": [
+    {"id": "F1", "severity": "S0", "summary": "量纲不一致", "disposition": "fixed", "evidence": "file:run/example/report.md"},
+    {"id": "F2", "severity": "S1", "summary": "边界情形未测", "disposition": "waived", "reason": "超出本单元边界，已登记后续任务"}
+  ]
+}
