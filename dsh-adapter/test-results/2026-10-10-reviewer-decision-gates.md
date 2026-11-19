@@ -1,6 +1,6 @@
 # 测试落盘：reviewer-decision-gates
 
-- 日期：2026-10-19
+- 日期：2026-11-19
 - 命令：`tsx --tsconfig <dsh>/tsconfig.json tests/reviewer-decision-gates.ts`
 - 场景：审查四项裁决实现（漂移即失效 / 同目标复用 + --force-review / auto 最小间隔常量 / 报告全文落盘）
 - 依据：`run/review/handoff-reviewer-overreview.md` §六 待裁决 1/2/4（裁决 3 为触发路径参数，见源码 `AUTO_MIN_GAP_MIN` 注释）
@@ -52,8 +52,8 @@
 | force：同上，assistant 的行首指令不生效 | false | false | S0-fix | ✅ |
 | force：用户消息行首指令生效 | true | true | S0-fix | ✅ |
 | 生产形状：hasDeliverable 认得 arguments 里的产物路径（旧实现为 false） | true | true | S0-1 | ✅ |
-| 生产形状：artifactPathsOfTurn 取出该路径（旧实现为 []） | /tmp/tc-8T5KK0/run/task-a/artifact.md | /tmp/tc-8T5KK0/run/task-a/artifact.md | S0-1 | ✅ |
-| 向后兼容：旧夹具形状（参数摊在 data 上）仍可解析 | /tmp/tc-8T5KK0/run/task-a/artifact.md | /tmp/tc-8T5KK0/run/task-a/artifact.md | S0-1 | ✅ |
+| 生产形状：artifactPathsOfTurn 取出该路径（旧实现为 []） | /tmp/tc-09sLHB/run/task-a/artifact.md | /tmp/tc-09sLHB/run/task-a/artifact.md | S0-1 | ✅ |
+| 向后兼容：旧夹具形状（参数摊在 data 上）仍可解析 | /tmp/tc-09sLHB/run/task-a/artifact.md | /tmp/tc-09sLHB/run/task-a/artifact.md | S0-1 | ✅ |
 | 生产形状：去重门的前置（路径集合）不再为空 | true | true | S0-1 | ✅ |
 | 收窄：写内核文档 docs/*.md → **不**触发（判别夹具） | false | false | narrow | ✅ |
 | 收窄：写任务产出 run/<任务>/*.md → 触发 | true | true | narrow | ✅ |
@@ -66,5 +66,16 @@
 | 生产回放：self-output（应不触发） | false | false | S0-5 | ✅ |
 | 生产回放：task-output（应触发） | true | true | S0-5 | ✅ |
 | 生产回放：infra（应不触发） | false | false | S0-5 | ✅ |
+| 审查提示 T2：含 RC-08（顺序不变性） | true | true | docs/20 W1 | ✅ |
+| 审查提示 T2：含 SC-07（可审查性） | true | true | docs/20 W1 | ✅ |
+| 审查提示 T1：前置 SC-07 | true | true | docs/20 W1 | ✅ |
+| 审查提示 T1：仍保留锚点链四问 | true | true | 回归 | ✅ |
+| 审查提示 T1：不引入 RC-08（只核对锚点链） | false | false | 边界 | ✅ |
+| W2 契约 coverage=1 → T1 | t1 | t1 | docs/20 W2 | ✅ |
+| W2 覆盖不足+高代价 → T2 | t2 | t2 | docs/20 W2 | ✅ |
+| W2 显式 t1 不得自降（契约 T2） | t2 | t2 | 防自降 | ✅ |
+| W2 无契约 → 默认 T1 | t1 | t1 | 默认 | ✅ |
+| W2 显式 t2 无契约 → T2 | t2 | t2 | 显式升级 | ✅ |
+| W2 契约在但工具缺失 → fail-closed T2 | t2 | t2 | fail-closed | ✅ |
 
-**51/51 通过, 0 失败**
+**62/62 通过, 0 失败**

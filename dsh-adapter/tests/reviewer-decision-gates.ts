@@ -7,10 +7,11 @@
  * 运行（在 dsh-adapter 目录）：
  *   <dsh>/node_modules/.bin/tsx --tsconfig <dsh>/tsconfig.json tests/reviewer-decision-gates.ts
  */
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, copyFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { sameReviewTarget, persistReport, appendReuseRecord, fingerprint, turnHasQuietDirective, turnHasForceDirective, hasDeliverable, artifactPathsOfTurn } from '../univedge-reviewer'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { sameReviewTarget, persistReport, appendReuseRecord, fingerprint, turnHasQuietDirective, turnHasForceDirective, hasDeliverable, artifactPathsOfTurn, buildReviewerPrompt, reviewTier } from '../univedge-reviewer'
 import { hasForceDirective, hasQuietDirective, isTaskOutput, transcriptOf, reviewIndexPath } from '../reviewer-shared'
 
 let pass = 0
@@ -193,6 +194,51 @@ rmSync(rootB, { recursive: true, force: true })
 
 // 序列化放在**全部 check() 之后**（R7 第十八轮 S0-1：原实现把表格打印放在文件中部，
 // 其后追加的 20 条探针只计入计数、不进表格 → 留档证据与自述不符）
+// W1（docs/20）：P12/P13 必须进入审查提示——T2 清单含 RC-08/SC-07；T1 前置 SC-07
+const promptInput = { task: 't', finalReply: 'r', artifacts: [], snapshotAt: '2026-10-20T00:00:00Z' }
+const promptT2 = buildReviewerPrompt(process.cwd(), promptInput, 't2')
+check('审查提示 T2：含 RC-08（顺序不变性）', promptT2.includes('RC-08'), true, 'docs/20 W1')
+check('审查提示 T2：含 SC-07（可审查性）', promptT2.includes('SC-07'), true, 'docs/20 W1')
+const promptT1 = buildReviewerPrompt(process.cwd(), promptInput, 't1')
+check('审查提示 T1：前置 SC-07', promptT1.includes('SC-07'), true, 'docs/20 W1')
+check('审查提示 T1：仍保留锚点链四问', promptT1.includes('锚点链核对清单'), true, '回归')
+check('审查提示 T1：不引入 RC-08（只核对锚点链）', promptT1.includes('RC-08'), false, '边界')
+
+// W2（docs/20）：档位由深度契约决定；显式 t1 不得自降；工具缺失/异常 fail-closed T2
+const repoRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))))
+const depthRoot = mkdtempSync(join(tmpdir(), 'ue-depth-'))
+mkdirSync(join(depthRoot, 'tools'), { recursive: true })
+copyFileSync(join(repoRoot, 'tools', 'review_depth.py'), join(depthRoot, 'tools', 'review_depth.py'))
+const lowCost: Record<string, unknown> = Object.fromEntries(
+  ['irreversible_action', 'downstream_amplification', 'conclusionization', 'handoff', 'convention_change']
+    .map((k) => [k, { value: false, evidence: 'check:true' }]),
+)
+lowCost.cost_threshold = { est_wall_min: 5, est_gpu_hours: 0, batch_runs: 1, source: 'none' }
+const baseCrit = { criterion: 'x', anchor_id: 'bench:b', anchor_source: 'arxiv:0803.0439', tolerance: '0', judge_mode: 'script', exec_cmd: 'true', negative_control_cmd: 'false' }
+function writeDepth(task: string, c: unknown): string {
+  const d = join(depthRoot, 'run', task)
+  mkdirSync(d, { recursive: true })
+  writeFileSync(join(d, 'review-depth.json'), JSON.stringify(c))
+  return join(d, 'report.md')
+}
+const artOK = writeDepth('a', { task: 'a', critical_steps: ['S1'], criteria: [{ step: 'S1', ...baseCrit }], high_cost: lowCost })
+check('W2 契约 coverage=1 → T1', reviewTier([], { root: depthRoot, artifacts: [artOK] }), 't1', 'docs/20 W2')
+const artHigh = writeDepth('b', {
+  task: 'b', critical_steps: ['S1'],
+  criteria: [{ step: 'S1', ...baseCrit, judge_mode: 'human', decision_rule: 'r', human_confirmed_by: 'han' }],
+  high_cost: { ...lowCost, downstream_amplification: { value: true, evidence: 'file:knowledge/claims.md' } },
+})
+check('W2 覆盖不足+高代价 → T2', reviewTier([], { root: depthRoot, artifacts: [artHigh] }), 't2', 'docs/20 W2')
+check('W2 显式 t1 不得自降（契约 T2）', reviewTier(['tier=t1'], { root: depthRoot, artifacts: [artHigh] }), 't2', '防自降')
+check('W2 无契约 → 默认 T1', reviewTier([], { root: depthRoot, artifacts: [join(depthRoot, 'run', 'none', 'report.md')] }), 't1', '默认')
+check('W2 显式 t2 无契约 → T2', reviewTier(['--review-t2'], { root: depthRoot, artifacts: [] }), 't2', '显式升级')
+const noToolRoot = mkdtempSync(join(tmpdir(), 'ue-depth-notool-'))
+mkdirSync(join(noToolRoot, 'run', 'c'), { recursive: true })
+writeFileSync(join(noToolRoot, 'run', 'c', 'review-depth.json'), JSON.stringify({ task: 'c', critical_steps: ['S1'], criteria: [{ step: 'S1', ...baseCrit }], high_cost: lowCost }))
+check('W2 契约在但工具缺失 → fail-closed T2', reviewTier([], { root: noToolRoot, artifacts: [join(noToolRoot, 'run', 'c', 'report.md')] }), 't2', 'fail-closed')
+rmSync(noToolRoot, { recursive: true, force: true })
+rmSync(depthRoot, { recursive: true, force: true })
+
 // 落盘头部由**测试自己产出**（此前提交版是人工添加的 6 行头部，测试不产出 → 永远无法复现；
 // 修法：把头部移进测试，随代码一起演进。见 run/review/handoff-reviewer-overreview.md §六）
 console.log('# 测试落盘：reviewer-decision-gates\n')

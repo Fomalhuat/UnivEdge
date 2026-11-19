@@ -1,5 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
-import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync, statSync, readdirSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { isAbsolute, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 import { join, dirname } from 'node:path'
@@ -430,14 +431,89 @@ function turnStartSeq(session: any, turn: number): number {
 /** 构造评估者 prompt（怀疑派立场，L2 上下文解耦声明，问题分级）。 */
 type ReviewTier = 't1' | 't2'
 
-/** 审查档位（docs/15 §2）：**默认 T1（核对锚点链，不重推）**；T2 = 全量独立重推（原行为）。
- *  来源：① 声明文本中的 `tier=t2` / `--review-t2`（生成者判断需全量时显式指定）；
- *  ② 环境变量 `UNIVEDGE_REVIEW_TIER=t2`（全局默认）。 */
-export function reviewTier(declared: string[] = []): ReviewTier {
+/** 深度契约文件是否形如 review-depth.json（P14，docs/20 W2）。 */
+function isDepthContract(path: string): boolean {
+  try {
+    const j = JSON.parse(readFileSync(path, 'utf8'))
+    return Array.isArray(j.critical_steps) && Array.isArray(j.criteria) && j.high_cost !== null && typeof j.high_cost === 'object'
+  } catch { return false }
+}
+
+/** 找本次审查的深度契约：优先从产物路径反推任务目录；无产物时取 `run/<task>/` 下最新的一份。 */
+function findDepthContract(root: string, artifacts: string[]): string | undefined {
+  const dirs = new Set<string>()
+  for (const a of artifacts) {
+    const abs = isAbsolute(a) ? a : resolve(root, a)
+    let d = dirname(abs)
+    for (let i = 0; i < 4 && d.startsWith(root); i += 1) {
+      dirs.add(d)
+      const parent = dirname(d)
+      if (parent === d) break
+      d = parent
+    }
+  }
+  if (dirs.size === 0) {
+    const runDir = join(root, 'run')
+    if (existsSync(runDir)) {
+      try {
+        for (const name of readdirSync(runDir)) dirs.add(join(runDir, name))
+      } catch { /* ignore */ }
+    }
+  }
+  let best: { path: string; mtime: number } | undefined
+  for (const d of dirs) {
+    for (const f of ['review-depth.json', 'contract.json']) {
+      const p = join(d, f)
+      if (!existsSync(p) || !isDepthContract(p)) continue
+      try {
+        const mtime = statSync(p).mtimeMs
+        if (!best || mtime > best.mtime) best = { path: p, mtime }
+      } catch { /* ignore */ }
+    }
+  }
+  return best?.path
+}
+
+/** 用 `review_depth.py --run` 判定档位（P14）。契约存在但判定失败 → **T2（fail-closed）**；
+ *  无契约 → undefined（调用方按默认 T1）。 */
+function tierFromDepthContract(root: string, artifacts: string[]): ReviewTier | undefined {
+  const contract = findDepthContract(root, artifacts)
+  if (!contract) return undefined
+  const tool = join(root, 'tools/review_depth.py')
+  if (!existsSync(tool)) {
+    diag('depth contract found but tool missing → fail-closed T2:', contract)
+    return 't2'
+  }
+  for (const bin of ['python3', 'python']) {
+    const r = spawnSync(bin, [tool, contract, '--root', root, '--run'], { cwd: root, encoding: 'utf8', timeout: 180_000 })
+    if (r.error) continue
+    try {
+      const out = JSON.parse(r.stdout || '{}') as { decision?: string; reasons?: string[] }
+      diag('depth decision:', contract, out.decision, (out.reasons ?? []).join(' | '))
+      if (out.decision === 'T1' || out.decision === 'T1+scripts') return 't1'
+      return 't2' // T2 / blocked / invalid 一律 fail-closed
+    } catch {
+      diag('depth output unparsable → fail-closed T2:', (r.stdout ?? '').slice(0, 200))
+      return 't2'
+    }
+  }
+  diag('depth tool could not run (no python3/python) → fail-closed T2')
+  return 't2'
+}
+
+/** 审查档位（docs/15 §2 + docs/20 W2）：显式 t2 / 环境变量可升档；**契约优先于声明 t1**（防自降）；
+ *  无契约 → 默认 T1（核对锚点链，不重推）；T2 = 全量独立重推。 */
+export function reviewTier(declared: string[] = [], opts: { root?: string; artifacts?: string[] } = {}): ReviewTier {
   const s = declared.join(' ')
   if (/\btier\s*=\s*t2\b|--review-t2\b/.test(s)) return 't2'
-  if (/\btier\s*=\s*t1\b|--review-t1\b/.test(s)) return 't1'
-  return process.env.UNIVEDGE_REVIEW_TIER === 't2' ? 't2' : 't1'
+  if (process.env.UNIVEDGE_REVIEW_TIER === 't2') return 't2'
+  const fromContract = opts.root ? tierFromDepthContract(opts.root, opts.artifacts ?? []) : undefined
+  if (fromContract) return fromContract
+  if (/\btier\s*=\s*t1\b|--review-t1\b/.test(s)) {
+    diag('explicit t1 honored（无深度契约）')
+    return 't1'
+  }
+  return 't1'
 }
 
 export function buildReviewerPrompt(root: string, input: { task: string; finalReply: string; artifacts: string[]; fingerprints?: Record<string, string>; snapshotAt: string }, tier: ReviewTier = 't1'): string {
@@ -481,7 +557,8 @@ export function buildReviewerPrompt(root: string, input: { task: string; finalRe
       ? '【锚点链核对清单（本档唯一任务）：四问，逐条给结论】——**不重推推导、不重算数值**'
       : '【审查清单（第 ③ 要素）：请逐项给 pass/fail/need_human/n-a】',
     ...(tier === 't1'
-      ? ['① 每条**结论**是否都显式给出锚点？（缺 → S1）',
+      ? ['⓿ 先确认**可审查性（SC-07，v0.15）**：仅凭产物文件能否定位全部证据？不能 → S1（先补证据位置，四问暂不作数）。',
+         '① 每条**结论**是否都显式给出锚点？（缺 → S1）',
          '② 锚点的**等级**（A0–A3，见 METHODOLOGY §0.2）标注是否正确？（把 A0 自洽 / 低阶估计标成高阶 → S0）',
          '③ 锚点的**有效域**是否覆盖该结论？（越界 → S0）',
          '④ **结论强度 ≤ 锚点强度**？（以 A0 自洽或低阶估计支撑高阶结论 → S0）',
@@ -489,6 +566,8 @@ export function buildReviewerPrompt(root: string, input: { task: string; finalRe
          '　若判断本次属"高代价裁决点"、T1 不足以判定，请在报告中说明并**建议升级 T2**。']
       : ['RC-01 生成-审查解耦（分级声明）、RC-02 可打分判定、RC-03 分歧日志、RC-04 交叉验证独立性、',
          'RC-05 测试设计审查（因素枚举/独立性/判据可判定/方法盲区/锚点充分）、RC-06 根因宣布协议、RC-07 意见核验、',
+         // W1（docs/20）：v0.15 新增的 P12/P13 检查项必须进入硬编码清单，否则"条款在、清单无"
+         'RC-08 审查稳定性（顺序不变性；不一致 → 升级/need_human）、SC-07 产物可审查性（弱审查者仅凭产物可复核）、',
          'CC-01 约定一致性、NC-04/NC-05 环境与运行链、NC-06 外部锚点对照、§0.4 产物四要素、§1.2 任务契约。']),
     '',
     '【假设与有效域（第 ④ 要素）】：若本次交付含任务契约（如 `run/*/contract.md`），请读取其中的',
@@ -635,7 +714,7 @@ async function runReview(ctx: Context, session: any, turn?: number, startSeq?: n
     return
   }
 
-  const tier = reviewTier(declaredPaths)
+  const tier = reviewTier(declaredPaths, { root, artifacts: input.artifacts })
   diag('review tier:', tier)
   const prompt = buildReviewerPrompt(root, input, tier)
   const parent = ctx.agents.get(session.id) as any
