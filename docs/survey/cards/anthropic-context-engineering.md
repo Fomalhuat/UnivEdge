@@ -1,7 +1,7 @@
 # Effective context engineering for AI agents（Anthropic Engineering）
 
 - **元数据**：Anthropic Applied AI ｜ 2025 ｜ 通用 agent 上下文工程 ｜ 一手（官方）
-  ｜ 获取 2026-10-16 ｜ 快照 `run/survey/sources/b1-context.{txt,html}`（txt sha256 前 16 位 `d2080e598010803e`）
+  ｜ 获取 2026-10-16 ｜ 快照 `run/survey/sources/b1-context.txt`、`run/survey/sources/b1-context.html`（txt sha256 前 16 位 `d2080e598010803e`）
   ｜ URL: https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents
 
 ## ① 任务分解与角色架构

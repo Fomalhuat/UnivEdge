@@ -1,7 +1,7 @@
 # How we built our multi-agent research system（Anthropic Engineering）
 
 - **元数据**：Anthropic Engineering ｜ 2025 ｜ 深度研究/信息检索 ｜ 一手（官方）
-  ｜ 获取 2026-10-16 ｜ 快照 `run/survey/sources/b1-multiagent.{txt,html}`（txt sha256 前 16 位 `543d8be30c4a42c1`）
+  ｜ 获取 2026-10-16 ｜ 快照 `run/survey/sources/b1-multiagent.txt`、`run/survey/sources/b1-multiagent.html`（txt sha256 前 16 位 `543d8be30c4a42c1`）
   ｜ URL: https://www.anthropic.com/engineering/multi-agent-research-system
 
 ## ① 任务分解与角色架构

@@ -1,7 +1,7 @@
 # Effective harnesses for long-running agents（Anthropic Engineering）
 
 - **元数据**：Anthropic Engineering ｜ 2025（页面未标日期）｜ 软件工程（泛化到长任务）｜ 一手（官方）
-  ｜ 获取 2026-10-16 ｜ 快照 `run/survey/sources/b1-harnesses.{txt,html}`（txt sha256 前 16 位 `c2a59fef0f71c031`）
+  ｜ 获取 2026-10-16 ｜ 快照 `run/survey/sources/b1-harnesses.txt`、`run/survey/sources/b1-harnesses.html`（txt sha256 前 16 位 `c2a59fef0f71c031`）
   ｜ URL: https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents
 - **备注**：本文是 docs/09 §7 遗留的"须补一手核实"项——本次完成核实，09 的二手转述与原文一致。
 

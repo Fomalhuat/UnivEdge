@@ -1,7 +1,7 @@
 # Don't Build Multi-Agents（Cognition / Walden Yan）
 
 - **元数据**：Cognition AI 官方博客 ｜ 2025-06-12 ｜ 生产级 agent 架构（Devin 团队）｜ 一手（官方）
-  ｜ 获取 2026-10-16 ｜ 快照 `run/survey/sources/b1-cognition.{txt,html}`（txt sha256 前 16 位 `48ffa3df327721f4`）
+  ｜ 获取 2026-10-16 ｜ 快照 `run/survey/sources/b1-cognition.txt`、`run/survey/sources/b1-cognition.html`（txt sha256 前 16 位 `48ffa3df327721f4`）
   ｜ URL: https://cognition.ai/blog/dont-build-multi-agents
 
 ## ① 任务分解与角色架构（核心主张）
