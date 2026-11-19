@@ -30,6 +30,7 @@ def main() -> int:
         ok = got == (decision, cov, high)
         fail += 0 if ok else 1
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: got={got} expected={(decision, cov, high)}")
+    print(f"**{len(EXPECTED) - fail}/{len(EXPECTED)} 通过, {fail} 失败**")
     return 1 if fail else 0
 
 if __name__ == "__main__":

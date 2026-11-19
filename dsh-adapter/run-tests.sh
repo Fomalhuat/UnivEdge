@@ -2,7 +2,7 @@
 # UnivEdge × dsh 适配层测试入口（**唯一推荐入口**——不必记 tsx / tsconfig 参数）
 #
 # 用法：
-#   bash dsh-adapter/run-tests.sh                    # 跑全部六项检查，证据写入 test-results/
+#   bash dsh-adapter/run-tests.sh                    # 跑全部检查，证据写入 test-results/
 #   bash dsh-adapter/run-tests.sh --update-l1-baseline   # L1 内容有变时刷新基线（见下）
 #   bash dsh-adapter/run-tests.sh --dsh /path/to/deepseek-harness
 #   bash dsh-adapter/run-tests.sh --date 2026-10-10   # 指定证据文件名前缀（默认沿用现有文件）
@@ -132,6 +132,15 @@ for suite in "${SUITES[@]}"; do
   fi
 done
 
+# ---- 第八项：review_depth 档位 fixtures（S0-1 常驻回归；2026-11-19 接入）----
+fx_out="test-results/${DATE_PREFIX}-review-depth-fixtures.md"
+if python3 tests/check_review_depth_fixtures.py > "$fx_out" 2>&1; then
+  printf '%-28s %s\n' "review-depth-fixtures" "✅ $(tail -1 "$fx_out")  → $fx_out"
+else
+  printf '%-28s %s\n' "review-depth-fixtures" "❌ $(tail -1 "$fx_out")  → $fx_out"
+  failed=1
+fi
+
 # ---- 文档计数**一致性**（不只是"存在性"）----
 # R7 第八轮 S1-1 → 第九轮 S1-2：原检查问"README 里有没有这个串"（存在即过），
 # 于是同一文件里并存 94/94 与 93 也照样通过。现改为：README 中出现的**所有** `<N>/<N> 通过`
@@ -140,7 +149,7 @@ done
 # 拆成 `70/70` 与 `通过` 两个词，而文档侧的旧采集恰好也产出同样的词，于是"通过"这个词**对称地**出现在两侧，
 # 掩盖了口径不一致（把两侧都改成纯数字后，缺失列表立刻报出 5 个"通过"）。现统一为**纯数字集合**。
 fresh=""
-for suite in "${SUITES[@]}" review-declare; do
+for suite in "${SUITES[@]}" review-declare review-depth-fixtures; do
   full=$(grep -oE '\b([0-9]+)/\1 通过' "test-results/${DATE_PREFIX}-${suite}.md" 2>/dev/null | tail -1)
   [ -z "$full" ] && continue
   fresh="$fresh ${full%%/*}"
@@ -167,7 +176,7 @@ done < <(find "$ROOT/run" -type f -name contract.md -printf '%T@\t%p\n' 2>/dev/n
 # ── 计数面（第十二轮 DRY 根治）：README **只允许套件表**承载当前计数（单一表面），
 # 契约允许 `N/N` 形式（它记录判决依据）。上一版的漏在于：README 侧只采集 `N/N 通过` 与表格单元格，
 # 而散文里的 `N 用例 / N 断言` 不参与比对 → 受控实验（把 `**116 用例**` 改成 115）仍报"全部通过"（假绿）。
-readme_cells="$(for suite in "${SUITES[@]}" review-declare.sh; do
+readme_cells="$(for suite in "${SUITES[@]}" review-declare.sh review-depth-fixtures; do
   sed -nE "s/^\| \`?${suite}\`? \| ([0-9]+) \|.*/\1/p" README.md 2>/dev/null; done)"
 contract_counts=""
 # 注意：`grep -o` 输出的是**整个匹配**（`70/70`），捕获组只在替换里可用 → 必须再切掉分母。
@@ -216,7 +225,7 @@ envfile="test-results/${DATE_PREFIX}-env.md"
   echo "- UnivEdge HEAD: $(cd "$ROOT" && git log -1 --format='%h %ci' 2>/dev/null || echo '?')"
   echo "- 工作树: $(cd "$ROOT" && [ -z "$(git status --porcelain 2>/dev/null)" ] && echo 干净 || echo '有未提交改动')"
   echo
-  echo "> 七份证据文件由同一次运行产生；本文件记录该次运行的环境（证据文件本身不重跑不会变）。"
+  echo "> 九份证据文件由同一次运行产生；本文件记录该次运行的环境（证据文件本身不重跑不会变）。"
 } > "$envfile"
 echo "▸ 环境记录: $envfile"
 # ---- 第五项：声明生成器自验证（R7 第十一轮 S1-1：新工具须有自验证用例并登记） ----
@@ -268,7 +277,7 @@ if [ $UPDATE_BASELINE = "1" ]; then
 fi
 [ "$failed_gates" = "1" ] && failed=1
 if [ $failed -eq 0 ]; then
-  echo "✅ 全部通过。七份证据出自同一次运行。"
+  echo "✅ 全部通过。九份证据出自同一次运行。"
   echo "   注：'证据是否晚于源码改动'**不在本脚本内判定**——本脚本自己会刷新证据，故在运行内判定恒为真"
   echo "   （第十二轮受控实验实测：写进去的空门从不触发）。该检查在 bash dsh-adapter/review-declare.sh（声明前自检）里。"
   exit 0

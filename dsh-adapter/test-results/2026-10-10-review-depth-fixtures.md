@@ -1,0 +1,11 @@
+[PASS] t1_exec_fails.json: got=('blocked', 0.0, False) expected=('blocked', 0.0, False)
+[PASS] t2_negctl_silent.json: got=('T1', 0.0, False) expected=('T1', 0.0, False)
+[PASS] t4_hc_none.json: got=('T2', 1.0, True) expected=('T2', 1.0, True)
+[PASS] t5_hc_tautology.json: got=('T1+scripts', 1.0, False) expected=('T1+scripts', 1.0, False)
+[PASS] t6_check_false.json: got=('T2', 1.0, True) expected=('T2', 1.0, True)
+[PASS] t7_file_ok.json: got=('T1+scripts', 1.0, False) expected=('T1+scripts', 1.0, False)
+[PASS] t8_file_missing.json: got=('T2', 1.0, True) expected=('T2', 1.0, True)
+[PASS] t9_check_echo.json: got=('T1+scripts', 1.0, False) expected=('T1+scripts', 1.0, False)
+[PASS] t10_cost_huge.json: got=('T2', 1.0, True) expected=('T2', 1.0, True)
+[PASS] t11_cost_slurm.json: got=('T2', 1.0, True) expected=('T2', 1.0, True)
+**10/10 通过, 0 失败**
