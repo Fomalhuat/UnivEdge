@@ -7,11 +7,11 @@
  * 运行（在 dsh-adapter 目录）：
  *   <dsh>/node_modules/.bin/tsx --tsconfig <dsh>/tsconfig.json tests/reviewer-decision-gates.ts
  */
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, copyFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, copyFileSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { sameReviewTarget, persistReport, appendReuseRecord, fingerprint, turnHasQuietDirective, turnHasForceDirective, hasDeliverable, artifactPathsOfTurn, buildReviewerPrompt, reviewTier } from '../univedge-reviewer'
+import { sameReviewTarget, persistReport, appendReuseRecord, fingerprint, turnHasQuietDirective, turnHasForceDirective, hasDeliverable, artifactPathsOfTurn, buildReviewerPrompt, reviewTier, expandDeclaredDirs } from '../univedge-reviewer'
 import { hasForceDirective, hasQuietDirective, isTaskOutput, transcriptOf, reviewIndexPath } from '../reviewer-shared'
 
 let pass = 0
@@ -229,8 +229,42 @@ const artHigh = writeDepth('b', {
   high_cost: { ...lowCost, downstream_amplification: { value: true, evidence: 'file:knowledge/claims.md' } },
 })
 check('W2 覆盖不足+高代价 → T2', reviewTier([], { root: depthRoot, artifacts: [artHigh] }), 't2', 'docs/20 W2')
+const artHighFull = writeDepth('c', {
+  task: 'c', critical_steps: ['S1'],
+  criteria: [{ step: 'S1', ...baseCrit }],
+  high_cost: { ...lowCost, handoff: { value: true, evidence: 'file:knowledge/claims.md' } },
+})
+check('W2 全覆盖但高代价 → T2（防门控被覆盖掩盖）', reviewTier([], { root: depthRoot, artifacts: [artHighFull] }), 't2', 'S0-1')
+check('W2 声明目录也能找到契约（→ T2）', reviewTier([], { root: depthRoot, artifacts: [join(depthRoot, 'run', 'c')] }), 't2', '目录声明')
+// R-2：根级契约（更新）不得接管任务级契约（更旧）
+const nearDir = join(depthRoot, 'run', 'near')
+mkdirSync(nearDir, { recursive: true })
+const nearContract = join(nearDir, 'review-depth.json')
+writeFileSync(nearContract, JSON.stringify({ task: 'near', critical_steps: ['S1'], criteria: [{ step: 'S1', ...baseCrit }], high_cost: lowCost }))
+writeFileSync(join(depthRoot, 'review-depth.json'), JSON.stringify({
+  task: 'root', critical_steps: ['S1'], criteria: [{ step: 'S1', ...baseCrit }],
+  high_cost: { ...lowCost, handoff: { value: true, evidence: 'file:knowledge/claims.md' } },
+}))
+const t0 = Date.now() / 1000
+utimesSync(nearContract, t0 - 100, t0 - 100)
+utimesSync(join(depthRoot, 'review-depth.json'), t0, t0)
+check('W2 最近祖先优先（根契约更新也不接管）', reviewTier([], { root: depthRoot, artifacts: [join(nearDir, 'report.md')] }), 't1', 'R-2')
+// R-3：声明目录展开为文件
+const expDir = mkdtempSync(join(tmpdir(), 'ue-expand-'))
+writeFileSync(join(expDir, 'a.md'), 'x')
+writeFileSync(join(expDir, 'b.txt'), 'y')
+writeFileSync(join(expDir, 'review-v1.md'), 'z')
+mkdirSync(join(expDir, 'sub'))
+writeFileSync(join(expDir, 'sub', 'c.txt'), 'w')
+const expanded = expandDeclaredDirs([expDir])
+check('声明目录递归展开、排除 review*.md',
+  expanded.length === 3 && expanded.some((p) => p.endsWith('c.txt')) && !expanded.some((p) => p.endsWith('review-v1.md')),
+  true, 'R-3/S1-a')
+rmSync(expDir, { recursive: true, force: true })
 check('W2 显式 t1 不得自降（契约 T2）', reviewTier(['tier=t1'], { root: depthRoot, artifacts: [artHigh] }), 't2', '防自降')
-check('W2 无契约 → 默认 T1', reviewTier([], { root: depthRoot, artifacts: [join(depthRoot, 'run', 'none', 'report.md')] }), 't1', '默认')
+const emptyRoot = mkdtempSync(join(tmpdir(), 'ue-depth-empty-'))
+check('W2 无契约 → 默认 T1', reviewTier([], { root: emptyRoot, artifacts: [join(emptyRoot, 'run', 'none', 'report.md')] }), 't1', '默认')
+rmSync(emptyRoot, { recursive: true, force: true })
 check('W2 显式 t2 无契约 → T2', reviewTier(['--review-t2'], { root: depthRoot, artifacts: [] }), 't2', '显式升级')
 const noToolRoot = mkdtempSync(join(tmpdir(), 'ue-depth-notool-'))
 mkdirSync(join(noToolRoot, 'run', 'c'), { recursive: true })

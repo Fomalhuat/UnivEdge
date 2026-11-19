@@ -186,6 +186,11 @@ import { extractReviewDeclarations, scanTurnDeclarations } from '../reviewer-sha
   check('声明：@review 无路径 → 空（约定：必须带路径）', extractReviewDeclarations('请 @review 一下'), [], 'declare')
   check('声明：大小写不敏感（@Review）', extractReviewDeclarations('@Review run/step5/x.md'), ['run/step5/x.md'], 'declare')
   check('声明：不存在的文件也提取（路径提取不查盘，留给评估者核实）', extractReviewDeclarations('@review run/ghost/x.md'), ['run/ghost/x.md'], 'declare')
+  // R-5（2026-11-19）：目录声明必须被解析（旧规则要求扩展名 → 整条静默丢弃）
+  check('声明：目录路径（相对）', extractReviewDeclarations('@review run/w1w2-smoke-c'), ['run/w1w2-smoke-c'], 'declare')
+  check('声明：目录路径（绝对）', extractReviewDeclarations('@review /data/home/hanwu/UnivEdge/run/w1w2-smoke-c'), ['/data/home/hanwu/UnivEdge/run/w1w2-smoke-c'], 'declare')
+  check('声明：文件 + 目录多行清单', extractReviewDeclarations('@review run/w1w2-smoke-c/report.md\n@review run/w1w2-smoke-c'), ['run/w1w2-smoke-c/report.md', 'run/w1w2-smoke-c'], 'declare')
+  check('声明：散文（含中文）不误判为目录', extractReviewDeclarations('@review 这个案例'), [], 'declare')
 
   // 事件级扫描（seq 窗口过滤 + user/assistant 事件）
   const evs = [

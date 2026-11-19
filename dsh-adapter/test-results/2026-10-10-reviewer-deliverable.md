@@ -84,6 +84,10 @@ S0 问题清单……
 | 声明：@review 无路径 → 空（约定：必须带路径） |  |  | declare | ✅ |
 | 声明：大小写不敏感（@Review） | run/step5/x.md | run/step5/x.md | declare | ✅ |
 | 声明：不存在的文件也提取（路径提取不查盘，留给评估者核实） | run/ghost/x.md | run/ghost/x.md | declare | ✅ |
+| 声明：目录路径（相对） | run/w1w2-smoke-c | run/w1w2-smoke-c | declare | ✅ |
+| 声明：目录路径（绝对） | /data/home/hanwu/UnivEdge/run/w1w2-smoke-c | /data/home/hanwu/UnivEdge/run/w1w2-smoke-c | declare | ✅ |
+| 声明：文件 + 目录多行清单 | run/w1w2-smoke-c/report.md,run/w1w2-smoke-c | run/w1w2-smoke-c/report.md,run/w1w2-smoke-c | declare | ✅ |
+| 声明：散文（含中文）不误判为目录 |  |  | declare | ✅ |
 | 声明扫描：窗口 [5,6] 只取 turn 内声明 | run/t1/a.md,run/t1/b.md | run/t1/a.md,run/t1/b.md | declare-scan | ✅ |
 | 声明扫描：窗口 [0,9] 全量 | run/t1/a.md,run/t1/b.md,run/t2/c.md | run/t1/a.md,run/t1/b.md,run/t2/c.md | declare-scan | ✅ |
 | 声明扫描：无事件 → 空 |  |  | declare-scan | ✅ |
@@ -122,7 +126,7 @@ S0 问题清单……
 | 声明解析：讨论里引述真实路径但无 @review → 不构成声明 | 0 | 0 | S0-1 | ✅ |
 | 声明解析：通配符不是路径 | 0 | 0 | S0-1 | ✅ |
 | 声明解析：非 ASCII（中文）路径必须被解析 | 1 | 1 | S0-1 | ✅ |
-| 声明：相对路径按 session cwd 解析（不依赖 process.cwd） | /tmp/cwdrel-BSYqci/dsh-adapter/x.ts | /tmp/cwdrel-BSYqci/dsh-adapter/x.ts | S0-1 | ✅ |
+| 声明：相对路径按 session cwd 解析（不依赖 process.cwd） | /tmp/cwdrel-yXj7TZ/dsh-adapter/x.ts | /tmp/cwdrel-yXj7TZ/dsh-adapter/x.ts | S0-1 | ✅ |
 | 声明：解析成功后不再出现在 dropped | 0 | 0 | S0-1 | ✅ |
 | 声明：相对路径也被记录指纹 | string | string | S0-1 | ✅ |
 | 声明解析：含空格的中文路径不会被截断成子串 | false | false | S0-1 | ✅ |
@@ -144,4 +148,4 @@ S0 问题清单……
 | 报告：组包后产物被改写 → 结论标失效（机制判定，2026-10-10 裁决 1 收紧） | true | true | S1-4b | ✅ |
 | 报告：状态行显式标注已失效 | true | true | S1-4b | ✅ |
 
-**125/125 通过, 0 失败**
+**129/129 通过, 0 失败**

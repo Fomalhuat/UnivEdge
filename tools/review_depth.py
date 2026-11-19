@@ -148,34 +148,52 @@ def evaluate(contract: dict, root: Path, cost_cfg: dict | None = None,
         else:
             hc_declared = True
     cost = hc.get("cost_threshold") or {}
-    src, parsed = cost.get("source"), None
-    if isinstance(src, str) and src.startswith("file:"):
-        sp = root / src[5:]
-        if sp.exists():
-            m = re.search(r"--time[= ](\d+):(\d{2}):(\d{2})", sp.read_text(encoding="utf-8", errors="ignore"))
-            parsed = int(m.group(1)) * 60 + int(m.group(2)) + int(m.group(3)) / 60 if m else None
-        else:
-            high = True; hc_notes.append(f"cost.source 不存在（{src}）")
+    src = cost.get("source")
+    parsed = None
+    if isinstance(src, str):
+        # 支持 file:<slurm 脚本> 与 slurm:<内联 #SBATCH> 两种来源
+        text = None
+        if src.startswith("file:"):
+            sp = root / src[5:]
+            if sp.exists():
+                text = sp.read_text(encoding="utf-8", errors="ignore")
+            else:
+                high = True; hc_notes.append(f"cost.source 不存在（{src}）")
+        elif src.startswith("slurm:"):
+            text = src
+        if text:
+            m = re.search(r"--time[= ](\d+):(\d{2}):(\d{2})", text)
+            if m:
+                parsed = int(m.group(1)) * 60 + int(m.group(2)) + int(m.group(3)) / 60
+                hc_notes.append(f"cost.est_wall_min 由 SLURM --time 解析={parsed:.0f}min")
     for k in ("est_wall_min", "est_gpu_hours", "batch_runs"):
-        v = cost.get(k, parsed if k == "est_wall_min" else None)
+        explicit = cost.get(k)
+        if k == "est_wall_min" and parsed is not None and explicit is not None:
+            v = max(float(explicit), float(parsed))   # S0-1：冲突取高，显式 0 不得压过 24h
+            if float(explicit) != float(parsed):
+                hc_notes.append(f"cost.est_wall_min 冲突：explicit={explicit}, parsed={parsed:.0f} → 取高 {v:.0f}")
+        elif k == "est_wall_min" and explicit is None and parsed is not None:
+            v = parsed
+        else:
+            v = explicit
         if v is None:
             high = True; hc_notes.append(f"cost.{k}=未知→按高代价")
         elif float(v) > float(cost_cfg[k]):
             high = True; hc_notes.append(f"cost.{k}={v}>{cost_cfg[k]}")
-    if parsed is not None:
-        hc_notes.append(f"cost.est_wall_min 由 SLURM --time 解析={parsed:.0f}min")
     rules["R8"] = "high" if high else ("low(declared)" if hc_declared else "low")
 
     if structural:
         decision = "invalid"; reasons.extend(structural)
     elif blocked:
         decision = "blocked"; reasons.append(f"R9 脚本判据失败: {', '.join(blocked)}")
+    elif high:
+        # S0-1（2026-11-19 实战审查发现）：高代价不得被"脚本全覆盖"掩盖。
+        # 全覆盖只证明"步骤有判据"，不证明"判据选对了题/值得这个代价"。
+        decision = "T2"; reasons.append("R9 高代价 → 全量重推（即使脚本覆盖 1.0；防门控被覆盖掩盖）")
     elif coverage == 1.0 and run and not hc_declared:
-        decision = "T1+scripts"; reasons.append("R9 关键步骤脚本+负控均已执行且高代价证据可核 → T1+脚本")
+        decision = "T1+scripts"; reasons.append("R9 低代价且关键步骤脚本+负控均已执行 → T1+脚本")
     elif coverage == 1.0:
         decision = "T1"; reasons.append("R9 覆盖 1.0 但存在 declared（未 --run 或高代价用 basis）→ 最高 T1")
-    elif high:
-        decision = "T2"; reasons.append("R9 覆盖不足且高代价 → 全量重推")
     else:
         decision = "T1"; reasons.append("R9 覆盖不足但低代价 → 终态抽验（残余风险记录）")
     reasons.extend(notes)
@@ -212,6 +230,17 @@ def _selftest() -> int:
     cases["hc_missing_T2"] = (none, True, "T2")
     fail = json.loads(json.dumps(base)); fail["criteria"][0]["exec_cmd"] = "false"
     cases["exec_fail_blocked"] = (fail, True, "blocked")
+    highfull = json.loads(json.dumps(base))
+    highfull["high_cost"]["handoff"] = {"value": True, "evidence": "file:knowledge/claims.md"}
+    cases["coverage_full_high_T2"] = (highfull, True, "T2")
+    inline = json.loads(json.dumps(base))
+    inline["high_cost"]["cost_threshold"] = {"est_wall_min": 0, "est_gpu_hours": 0, "batch_runs": 1,
+                                             "source": "slurm:#SBATCH --time=24:00:00"}
+    cases["slurm_inline_24h_T2"] = (inline, True, "T2")
+    halflow = json.loads(json.dumps(base))
+    halflow["criteria"][1] = {"step": "S2", "criterion": "y", "anchor_id": "claim:c", "anchor_source": "claim:C-1",
+                              "tolerance": "0", "judge_mode": "human", "decision_rule": "A and B", "human_confirmed_by": "han"}
+    cases["coverage_half_low_T1"] = (halflow, True, "T1")
     bad = json.loads(json.dumps(base)); bad["criteria"][0]["anchor_source"] = "memory"
     cases["anchor_invalid"] = (bad, True, "invalid")
     ok = True
@@ -219,6 +248,14 @@ def _selftest() -> int:
         got = evaluate(c, Path(".").resolve(), run=r)["decision"]
         good = got == exp; ok &= good
         print(f"[{'PASS' if good else 'FAIL'}] {name}: expected={exp} got={got}")
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        Path(td, "job.sh").write_text("#!/bin/bash\n#SBATCH --time=24:00:00\n", encoding="utf-8")
+        f = json.loads(json.dumps(base))
+        f["high_cost"]["cost_threshold"] = {"est_wall_min": 0, "est_gpu_hours": 0, "batch_runs": 1, "source": "file:job.sh"}
+        got = evaluate(f, Path(td), run=True)["decision"]
+        good = got == "T2"; ok &= good
+        print(f"[{'PASS' if good else 'FAIL'}] slurm_file_24h_T2: expected=T2 got={got}")
     return 0 if ok else 1
 
 

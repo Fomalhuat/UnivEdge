@@ -10,3 +10,7 @@ knowledge/benchmarks.md
 knowledge/claims.md
 knowledge/papers/
 knowledge/work-types.md
+
+# Python 生成的缓存（review_depth.py 导入时产生）
+__pycache__/
+*.pyc

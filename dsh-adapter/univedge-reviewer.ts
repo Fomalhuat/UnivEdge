@@ -204,7 +204,7 @@ export function extractReviewInput(session: any, startSeq = 0, endSeq = Number.M
   const cwd = session?.header?.cwd ?? ''
   // R7 第九轮 S0-1：声明路径先按 session cwd 规范化（否则 dsh 进程 cwd 下全部判为不存在）
   const declaredNorm = normalizeDeclared(cwd, declaredPaths)
-  const artifacts = new Set<string>(declaredNorm)
+  const artifacts = new Set<string>(expandDeclaredDirs(declaredNorm))
   const candidateSeq = new Map<string, number>()   // path → 最近一次出现的 seq（用于"取最近写入"兜底）
   const evts = session?.events ?? []
   for (const ev of evts) {
@@ -441,44 +441,87 @@ function isDepthContract(path: string): boolean {
 
 /** 找本次审查的深度契约：优先从产物路径反推任务目录；无产物时取 `run/<task>/` 下最新的一份。 */
 function findDepthContract(root: string, artifacts: string[]): string | undefined {
-  const dirs = new Set<string>()
+  // R-2（2026-11-19 审查）：按**最近祖先**选择契约，而不是全局 mtime 最新——
+  // 否则仓库根的 review-depth.json 会接管任务级契约（门控被远离产物的文件决定）。
+  const candidates: Array<{ path: string; score: number; mtime: number }> = []
   for (const a of artifacts) {
     const abs = isAbsolute(a) ? a : resolve(root, a)
-    let d = dirname(abs)
-    for (let i = 0; i < 4 && d.startsWith(root); i += 1) {
-      dirs.add(d)
+    let d = existsSync(abs) && statSync(abs).isDirectory() ? abs : dirname(abs)
+    for (let i = 0; i < 8 && d.startsWith(root); i += 1) {
+      let found: string | undefined
+      for (const f of ['review-depth.json', 'contract.json']) {
+        const p = join(d, f)
+        if (existsSync(p) && isDepthContract(p)) { found = p; break }
+      }
+      if (found) {
+        candidates.push({ path: found, score: d.length, mtime: statSync(found).mtimeMs })
+        break
+      }
       const parent = dirname(d)
       if (parent === d) break
       d = parent
     }
   }
-  if (dirs.size === 0) {
-    const runDir = join(root, 'run')
-    if (existsSync(runDir)) {
-      try {
-        for (const name of readdirSync(runDir)) dirs.add(join(runDir, name))
-      } catch { /* ignore */ }
-    }
+  if (candidates.length > 0) {
+    candidates.sort((x, y) => y.score - x.score || y.mtime - x.mtime)
+    return candidates[0].path
   }
+  if (artifacts.length > 0) return undefined   // 有产物但无契约：不得用 run/ 下无关契约兜底
+  const runDir = join(root, 'run')
   let best: { path: string; mtime: number } | undefined
-  for (const d of dirs) {
-    for (const f of ['review-depth.json', 'contract.json']) {
-      const p = join(d, f)
-      if (!existsSync(p) || !isDepthContract(p)) continue
-      try {
-        const mtime = statSync(p).mtimeMs
-        if (!best || mtime > best.mtime) best = { path: p, mtime }
-      } catch { /* ignore */ }
-    }
+  if (existsSync(runDir)) {
+    try {
+      for (const name of readdirSync(runDir)) {
+        for (const f of ['review-depth.json', 'contract.json']) {
+          const p = join(runDir, name, f)
+          if (!existsSync(p) || !isDepthContract(p)) continue
+          const mtime = statSync(p).mtimeMs
+          if (!best || mtime > best.mtime) best = { path: p, mtime }
+        }
+      }
+    } catch { /* ignore */ }
   }
   return best?.path
 }
 
-/** 用 `review_depth.py --run` 判定档位（P14）。契约存在但判定失败 → **T2（fail-closed）**；
- *  无契约 → undefined（调用方按默认 T1）。 */
+/** R-3（2026-11-19 审查）：声明目录时展开为产物；S1-a：递归 + 排除契约/审查产出 + 上限告警。
+ *  排除 review*.md：审查报告是评估者结论，拉进输入包会造成锚定（独立审查实测）。
+ *  子目录不再静默丢失；超过上限时 diag 记录 omitted 数（仍非 dropped，属已知残余）。 */
+export function expandDeclaredDirs(paths: string[]): string[] {
+  const out: string[] = []
+  const CAP = 50
+  let omitted = 0
+  const skip = /^(review-depth\.json|contract\.md|review.*\.md)$/i
+  const walk = (dir: string, depth: number): void => {
+    if (depth > 3) return
+    for (const name of readdirSync(dir)) {
+      if (skip.test(name)) continue
+      const f = join(dir, name)
+      try {
+        const st = statSync(f)
+        if (st.isFile()) {
+          if (out.length < CAP) out.push(f)
+          else omitted += 1
+        } else if (st.isDirectory()) walk(f, depth + 1)
+      } catch { /* ignore */ }
+    }
+  }
+  for (const p of paths) {
+    try {
+      if (statSync(p).isDirectory()) walk(p, 0)
+      else out.push(p)
+    } catch { out.push(p) }
+  }
+  if (omitted > 0) diag(`expandDeclaredDirs: omitted ${omitted} files (cap ${CAP})`)
+  return [...new Set(out)]
+}
+
 function tierFromDepthContract(root: string, artifacts: string[]): ReviewTier | undefined {
   const contract = findDepthContract(root, artifacts)
-  if (!contract) return undefined
+  if (!contract) {
+    diag(`no depth contract found (artifacts=${artifacts.length}) → default T1`)
+    return undefined
+  }
   const tool = join(root, 'tools/review_depth.py')
   if (!existsSync(tool)) {
     diag('depth contract found but tool missing → fail-closed T2:', contract)
@@ -488,8 +531,10 @@ function tierFromDepthContract(root: string, artifacts: string[]): ReviewTier | 
     const r = spawnSync(bin, [tool, contract, '--root', root, '--run'], { cwd: root, encoding: 'utf8', timeout: 180_000 })
     if (r.error) continue
     try {
-      const out = JSON.parse(r.stdout || '{}') as { decision?: string; reasons?: string[] }
+      const out = JSON.parse(r.stdout || '{}') as { decision?: string; high_cost?: boolean; reasons?: string[] }
       diag('depth decision:', contract, out.decision, (out.reasons ?? []).join(' | '))
+      // S0-1 双保险（2026-11-19 实战审查）：即使 decision 字符串异常，高代价一律 T2
+      if (out.high_cost === true) return 't2'
       if (out.decision === 'T1' || out.decision === 'T1+scripts') return 't1'
       return 't2' // T2 / blocked / invalid 一律 fail-closed
     } catch {
@@ -554,7 +599,7 @@ export function buildReviewerPrompt(root: string, input: { task: string; finalRe
     '- 外部锚点通道（可自行复核）：① dsh 会话日志 `$DSH_SESSION_JSONL` 的 `request/header`（记录完整系统提示）与 `assistant/message.usage`（token 计量）；② 插件诊断日志 `/tmp/univedge-*.log`；③ `git log/show`（历史状态重建）',
     '',
     tier === 't1'
-      ? '【锚点链核对清单（本档唯一任务）：四问，逐条给结论】——**不重推推导、不重算数值**'
+      ? '【锚点链核对清单（本档唯一任务）：前置 SC-07 + 四问，逐条给结论】——**不重推推导、不重算数值**'
       : '【审查清单（第 ③ 要素）：请逐项给 pass/fail/need_human/n-a】',
     ...(tier === 't1'
       ? ['⓿ 先确认**可审查性（SC-07，v0.15）**：仅凭产物文件能否定位全部证据？不能 → S1（先补证据位置，四问暂不作数）。',

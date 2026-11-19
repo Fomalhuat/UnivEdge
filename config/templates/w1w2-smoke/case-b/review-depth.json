@@ -1,0 +1,38 @@
+{
+  "task": "w1w2-smoke-b",
+  "artifact_id": "run/w1w2-smoke-b/report.md",
+  "critical_steps": ["S1-file-exists", "S2-human-judgment"],
+  "criteria": [
+    {
+      "step": "S1-file-exists",
+      "criterion": "run/w1w2-smoke-b/report.md 存在且非空",
+      "anchor_id": "claim:C-SMOKE-B",
+      "anchor_source": "file:run/w1w2-smoke-b/report.md",
+      "tolerance": "size > 0",
+      "judge_mode": "script",
+      "exec_cmd": "python3 -c \"import pathlib,sys; p=pathlib.Path('run/w1w2-smoke-b/report.md'); sys.exit(0 if p.exists() and p.stat().st_size>0 else 1)\"",
+      "negative_control_cmd": "python3 -c \"import pathlib,sys; sys.exit(0 if pathlib.Path('run/w1w2-smoke-b/MISSING.md').exists() else 1)\"",
+      "last_result": "pass",
+      "negative_control_result": "fail"
+    },
+    {
+      "step": "S2-human-judgment",
+      "criterion": "报告中的主张与证据是否一致（人工判断）",
+      "anchor_id": "claim:C-SMOKE-B2",
+      "anchor_source": "file:knowledge/claims.md",
+      "tolerance": "人工决策规则",
+      "judge_mode": "human",
+      "decision_rule": "若主张与引用证据不一致则 fail；否则 pass",
+      "human_confirmed_by": "han",
+      "negative_control": "n/a"
+    }
+  ],
+  "high_cost": {
+    "irreversible_action": {"value": false, "evidence": "check:true"},
+    "downstream_amplification": {"value": true, "evidence": "file:knowledge/claims.md"},
+    "conclusionization": {"value": false, "evidence": "check:true"},
+    "handoff": {"value": false, "evidence": "check:true"},
+    "convention_change": {"value": false, "evidence": "check:true"},
+    "cost_threshold": {"est_wall_min": 5, "est_gpu_hours": 0, "batch_runs": 1, "source": "none"}
+  }
+}

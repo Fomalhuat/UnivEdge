@@ -52,8 +52,8 @@
 | force：同上，assistant 的行首指令不生效 | false | false | S0-fix | ✅ |
 | force：用户消息行首指令生效 | true | true | S0-fix | ✅ |
 | 生产形状：hasDeliverable 认得 arguments 里的产物路径（旧实现为 false） | true | true | S0-1 | ✅ |
-| 生产形状：artifactPathsOfTurn 取出该路径（旧实现为 []） | /tmp/tc-09sLHB/run/task-a/artifact.md | /tmp/tc-09sLHB/run/task-a/artifact.md | S0-1 | ✅ |
-| 向后兼容：旧夹具形状（参数摊在 data 上）仍可解析 | /tmp/tc-09sLHB/run/task-a/artifact.md | /tmp/tc-09sLHB/run/task-a/artifact.md | S0-1 | ✅ |
+| 生产形状：artifactPathsOfTurn 取出该路径（旧实现为 []） | /tmp/tc-bArecD/run/task-a/artifact.md | /tmp/tc-bArecD/run/task-a/artifact.md | S0-1 | ✅ |
+| 向后兼容：旧夹具形状（参数摊在 data 上）仍可解析 | /tmp/tc-bArecD/run/task-a/artifact.md | /tmp/tc-bArecD/run/task-a/artifact.md | S0-1 | ✅ |
 | 生产形状：去重门的前置（路径集合）不再为空 | true | true | S0-1 | ✅ |
 | 收窄：写内核文档 docs/*.md → **不**触发（判别夹具） | false | false | narrow | ✅ |
 | 收窄：写任务产出 run/<任务>/*.md → 触发 | true | true | narrow | ✅ |
@@ -73,9 +73,13 @@
 | 审查提示 T1：不引入 RC-08（只核对锚点链） | false | false | 边界 | ✅ |
 | W2 契约 coverage=1 → T1 | t1 | t1 | docs/20 W2 | ✅ |
 | W2 覆盖不足+高代价 → T2 | t2 | t2 | docs/20 W2 | ✅ |
+| W2 全覆盖但高代价 → T2（防门控被覆盖掩盖） | t2 | t2 | S0-1 | ✅ |
+| W2 声明目录也能找到契约（→ T2） | t2 | t2 | 目录声明 | ✅ |
+| W2 最近祖先优先（根契约更新也不接管） | t1 | t1 | R-2 | ✅ |
+| 声明目录递归展开、排除 review*.md | true | true | R-3/S1-a | ✅ |
 | W2 显式 t1 不得自降（契约 T2） | t2 | t2 | 防自降 | ✅ |
 | W2 无契约 → 默认 T1 | t1 | t1 | 默认 | ✅ |
 | W2 显式 t2 无契约 → T2 | t2 | t2 | 显式升级 | ✅ |
 | W2 契约在但工具缺失 → fail-closed T2 | t2 | t2 | fail-closed | ✅ |
 
-**62/62 通过, 0 失败**
+**66/66 通过, 0 失败**

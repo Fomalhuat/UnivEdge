@@ -41,6 +41,7 @@ G1/G3 已实现于 `tools/review_depth.py`（`--run` 模式），并用同一任
 | 真执行 | `review_depth.py contract.json --run` | **T1+scripts**（4/4 覆盖，负控均失败，高代价 check 均 exit 0） |
 | 负控静默 | 把 S1 的 `negative_control_cmd` 改成 `true` | **T1**（coverage 0.75，"R5 负控未失败→不计覆盖"） |
 | 负控静默 + 高代价 | 再把 downstream check 改成 exit 1 | **T2**（"覆盖不足且高代价"） |
+| **全覆盖 + 高代价** | case-c（coverage=1.0，downstream=true） | **T2**（v0.18 修 S0-1：高代价先于覆盖分支，不得被脚本覆盖掩盖） |
 
 实现细节：`--run` 执行 `exec_cmd`（须 exit 0）与 `negative_control_cmd`（须 **非零**）；
 高代价 false 须 `check:`（`--run` 时执行）/`file:`/`basis:`，`none` → 按高代价；

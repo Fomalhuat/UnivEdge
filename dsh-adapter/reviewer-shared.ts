@@ -313,6 +313,9 @@ const PATH_EXT = 'md|markdown|json|jsonl|txt|csv|yaml|yml|log|dat|ts|tsx|js|mjs|
 // \p{L}\p{N} 覆盖 CJK 等非 ASCII 路径字符（R7 第九轮：此前 `\w` 只含 [A-Za-z0-9_]，
 // 中文文件名（如 docs/08-内核维护工作流.md）会被静默丢弃）；使用 `u` 标志启用 Unicode 属性转义。
 const PATH_TOKEN_SRC = `[\\p{L}\\p{N}._/\\-]+\\.(?:${PATH_EXT})\\b`
+/** 纯目录声明（R-5，2026-11-19）：`@review run/<task>` 是合理输入，但旧规则要求扩展名 →
+ *  整条声明被静默丢弃。只在**整段尾巴就是目录**时接受（避免把"路径/含空格 的文件.md"截成子串）。 */
+const PURE_DIR_RE = /^\s*(\/?[\p{L}\p{N}._\-]+(?:\/[\p{L}\p{N}._\-]+)+\/?)\s*$/u
 
 /** 行首的声明头（仅用于判定"是否需要把后续行纳入同一声明块"）。 */
 const DECL_LINE_RE = /^[ \t>*\-]*@review\b/i
@@ -335,6 +338,7 @@ function isPureDeclarationTail(tail: string): boolean {
     .replace(new RegExp(REVIEW_DECLARE_RE.source, 'gi'), '')   // 同一行的后续 @review 不算散文
   // 纯路径清单（只剩分隔符）→ 声明；以括号/破折号开头的简注 → 仍视为声明（如"（本轮交付）"）；
   // 其余（出现散文词，如"的语义""这个案例"）→ 判为讨论/引述，不触发。
+  if (PURE_DIR_RE.test(tail.trim())) return true
   return SEPARATOR_ONLY_RE.test(withoutPaths) || COMMENT_TAIL_RE.test(withoutPaths)
 }
 
@@ -376,10 +380,15 @@ export function extractReviewDeclarations(txt: string): string[] {
         }
       }
       for (const raw of block) {
-        for (const c of pathsInLine(raw)) {
+        const found = pathsInLine(raw)
+        for (const c of found) {
           if (c.includes('*') || /^https?:/i.test(c)) continue
           if (isReviewSelfOutput(c)) continue
           out.push(c)
+        }
+        if (found.length === 0) {
+          const m = raw.trim().match(PURE_DIR_RE)
+          if (m && !isReviewSelfOutput(m[1])) out.push(m[1])
         }
       }
     }
